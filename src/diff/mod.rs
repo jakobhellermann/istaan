@@ -1,6 +1,7 @@
 use std::path::Path;
 
-use anyhow::{Context, Result};
+use anstream::eprintln;
+use anyhow::Result;
 use diffy::{DiffOptions, PatchFormatter};
 
 pub struct DiffResult {
@@ -28,18 +29,20 @@ impl From<String> for DiffResult {
 }
 
 pub fn diff(path: &Path, old: &[u8], new: &[u8]) -> Result<DiffResult> {
-    let extension = path
-        .extension()
-        .map(|e| e.to_str().context("non-utf8 extension"))
-        .transpose()?;
-
-    if extension == Some("json") {
+    if path.extension().is_some_and(|ext| ext == "json") {
         return Ok(DiffResult::diff_ext(diff_json(old, new)?));
     }
 
     if let Some(content) = try_diff_text(&old, &new)? {
         return Ok(DiffResult::diff_ext(content));
     }
+
+    let style =
+        anstyle::Style::new().fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::Yellow)));
+    eprintln!(
+        "{style}Unrecognized binary format: {}{style:#}",
+        path.display()
+    );
 
     Ok(DiffResult {
         content: "not yet implemented".into(),
