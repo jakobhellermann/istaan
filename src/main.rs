@@ -7,6 +7,7 @@ use clap::Parser;
 use rabex_env::Environment;
 use rabex_env::rabex::tpk::TpkTypeTreeBlob;
 use rabex_env::rabex::typetree::typetree_cache::sync::TypeTreeCache;
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 use crate::depotdownloader_manifest::Manifest;
 use crate::diff::Context;
@@ -122,7 +123,7 @@ fn main() -> Result<()> {
 }
 
 fn diff(manifest_files: OldNew<&ManifestFiles>, diff_out_dir: &Path) -> Result<()> {
-    // std::fs::remove_dir_all(diff_out_dir)?;
+    std::fs::remove_dir_all(diff_out_dir)?;
 
     let tpk = TypeTreeCache::new(TpkTypeTreeBlob::embedded());
     let unity_game = manifest_files
@@ -146,30 +147,36 @@ fn diff(manifest_files: OldNew<&ManifestFiles>, diff_out_dir: &Path) -> Result<(
         }
     }
 
-    for path in file_changes.same {
-        let manifest_file = manifest_files.map(|x| &x.manifest.files[path]);
+    file_changes
+        .same
+        .into_par_iter()
+        .map(|path| {
+            let manifest_file = manifest_files.map(|x| &x.manifest.files[path]);
 
-        if manifest_file.map(|file| file.flags).changed() {
-            println!(
-                "Changed '{path}' flags from {:b} to {:b}",
-                manifest_file.old.flags, manifest_file.new.flags
-            );
-        }
-        if manifest_file.map(|file| &file.sha).changed() {
-            println!("Changed '{path}'",);
-
-            let mut diff_out_file = diff_out_dir.join(path);
-            std::fs::create_dir_all(diff_out_file.parent().unwrap())?;
-
-            let data = manifest_files.try_map(|f| std::fs::read(f.path.join(path)))?;
-            let diff = diff::diff(&cx, Path::new(path), data.as_deref())?;
-
-            if let Some(extension) = diff.extension {
-                diff_out_file.add_extension(extension);
+            if manifest_file.map(|file| file.flags).changed() {
+                println!(
+                    "Changed '{path}' flags from {:b} to {:b}",
+                    manifest_file.old.flags, manifest_file.new.flags
+                );
             }
-            std::fs::write(diff_out_file, diff.content)?;
-        }
-    }
+            if manifest_file.map(|file| &file.sha).changed() {
+                println!("Changed '{path}'",);
+
+                let mut diff_out_file = diff_out_dir.join(path);
+                std::fs::create_dir_all(diff_out_file.parent().unwrap())?;
+
+                let data = manifest_files.try_map(|f| std::fs::read(f.path.join(path)))?;
+                let diff = diff::diff(&cx, Path::new(path), data.as_deref())?;
+
+                if let Some(extension) = diff.extension {
+                    diff_out_file.add_extension(extension);
+                }
+                std::fs::write(diff_out_file, diff.content)?;
+            }
+
+            Ok(())
+        })
+        .collect::<Result<()>>()?;
 
     Ok(())
 }
