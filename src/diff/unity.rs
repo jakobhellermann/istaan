@@ -6,30 +6,38 @@ use anstream::eprintln;
 use anstyle::{Color, Style};
 use anyhow::{Context as _, Result};
 use rabex::files::bundlefile::{BundleFileReader, ExtractionConfig};
-use rabex_env::rabex::files::SerializedFile;
+use rabex_env::{handle::SerializedFileHandle, rabex::files::SerializedFile};
 
 use crate::old_new::OldNew;
 
 use super::Context;
 
 pub fn diff_serializedfile(cx: &Context, path: &Path, data: OldNew<&[u8]>) -> Result<String> {
+    let env = cx
+        .unity_game
+        .as_ref()
+        .context("cannot diff bundlefile outside unity game")?;
+
     let old_reader = &mut Cursor::new(data.old);
     let new_reader = &mut Cursor::new(data.new);
     let old = SerializedFile::from_reader(old_reader)?;
     let new = SerializedFile::from_reader(new_reader)?;
+
+    let old = SerializedFileHandle::new(&env.old, &old, data.old);
+    let new = SerializedFileHandle::new(&env.new, &new, data.new);
 
     let file = OldNew::new(old, new);
     let old = &file.old;
     let new = &file.new;
 
     let mut text = super::diff_text(OldNew::new(
-        &format!("{:#?}", format::SerializedFile::from(old)),
-        &format!("{:#?}", format::SerializedFile::from(new)),
+        &format!("{:#?}", format::SerializedFile::from(old.file)),
+        &format!("{:#?}", format::SerializedFile::from(new.file)),
     ));
 
     let object_changes = file
         .as_ref()
-        .changes(|file| file.objects().map(|x| x.m_PathID));
+        .changes(|file| file.file.objects().map(|x| x.m_PathID));
 
     text.push_str("\n\n");
     writeln!(
@@ -39,58 +47,78 @@ pub fn diff_serializedfile(cx: &Context, path: &Path, data: OldNew<&[u8]>) -> Re
     )?;
     writeln!(&mut text, "Added {} objects", object_changes.added.len())?;
 
-    if let Some(env) = &cx.unity_game {
-        for added in object_changes.added {
-            let new_object = new.get_object::<serde_json::Value>(added, &env.new.tpk)?;
-            let new_value = new_object.read(new_reader)?;
-            writeln!(
-                &mut text,
-                "--- added object {:?} {added} ---\n{}",
-                new_object.info.m_ClassID,
-                serde_json::to_string_pretty(&new_value)?
-            )?;
-        }
+    for added in object_changes.added {
+        let new_object = new.object_at::<serde_json::Value>(added)?;
+        let new_value = new_object.read()?;
+        writeln!(
+            &mut text,
+            "--- added object {:?} {added} ---\n{}",
+            new_object.object.info.m_ClassID,
+            serde_json::to_string_pretty(&new_value)?
+        )?;
+    }
 
-        for path_id in object_changes.same {
-            let old_object = old.get_object::<serde_json::Value>(path_id, &env.old.tpk)?;
-            let new_object = new.get_object::<serde_json::Value>(path_id, &env.new.tpk)?;
+    for path_id in object_changes.same {
+        let old_object = old.object_at::<serde_json::Value>(path_id)?;
+        let new_object = new.object_at::<serde_json::Value>(path_id)?;
 
-            let old_data = old_object.get_raw_data(old_reader)?;
-            let new_data = new_object.get_raw_data(new_reader)?;
+        let old_data = old_object.object.get_raw_data(&mut old.reader())?;
+        let new_data = new_object.object.get_raw_data(&mut new.reader())?;
 
-            if old_data != new_data {
-                writeln!(&mut text, "--- change object at path id {path_id} ---",)?;
+        if old_data != new_data {
+            writeln!(&mut text, "--- change object at path id {path_id} ---",)?;
 
-                if let Err(e) = (|| -> Result<()> {
-                    let old_value = old_object.read(old_reader)?;
-                    let new_value = new_object.read(new_reader)?;
-                    let value = OldNew::new(old_value, new_value);
+            if let Err(e) = (|| -> Result<()> {
+                // let old_value = old_object.read()?;
+                // let new_value = new_object.read()?;
+                let old_value = old_object.object.read(&mut old_object.file.reader())?;
+                let new_value = new_object.object.read(&mut new_object.file.reader())?;
 
-                    let formatted = value.try_map(|val| serde_json::to_string_pretty(&val))?;
-                    let diff = super::diff_text(formatted.as_deref());
-                    writeln!(&mut text, "> {:?}\n{}", new_object.info.m_ClassID, diff)?;
+                let name = new_value
+                    .get("m_Name")
+                    .and_then(serde_json::Value::as_str)
+                    .map(ToOwned::to_owned);
 
-                    /*writeln!(
-                        &mut text,
-                        "> old {:?} {}",
-                        old_object.info.m_ClassID, formatted.old
-                    )?;
-                    writeln!(
-                        &mut text,
-                        "> new {:?} {}",
-                        new_object.info.m_ClassID, formatted.new
-                    )?;*/
-                    Ok(())
-                })() {
-                    let style = Style::new().fg_color(Some(Color::Ansi(anstyle::AnsiColor::Red)));
-                    eprintln!(
-                        "{style}Skipping {:?} object in {} (Path ID {}): {e}{style:#}",
-                        new_object.info.m_ClassID,
-                        path.display(),
-                        path_id,
-                    );
-                    writeln!(&mut text, "{}", e)?;
+                let value = OldNew::new(old_value, new_value);
+
+                let diff = super::diff_json(value)?;
+                write!(&mut text, "> {:?}", new_object.class_id())?;
+                let script = old_object.mono_script()?;
+                if let Some(script) = script {
+                    write!(&mut text, " {}", script.full_name())?;
                 }
+                if let Some(name) = name {
+                    write!(&mut text, " ({})", name)?;
+                }
+
+                if old_object.class_id() != new_object.class_id() {
+                    writeln!(&mut text, " (previously {:?})", old_object.class_id())?;
+                    return Ok(());
+                }
+
+                writeln!(&mut text)?;
+                writeln!(&mut text, "{}", diff)?;
+
+                /*writeln!(
+                    &mut text,
+                    "> old {:?} {}",
+                    old_object.info.m_ClassID, formatted.old
+                )?;
+                writeln!(
+                    &mut text,
+                    "> new {:?} {}",
+                    new_object.info.m_ClassID, formatted.new
+                )?;*/
+                Ok(())
+            })() {
+                let style = Style::new().fg_color(Some(Color::Ansi(anstyle::AnsiColor::Red)));
+                eprintln!(
+                    "{style}Skipping {:?} object in {} (Path ID {}): {e:?}{style:#}",
+                    new_object.class_id(),
+                    path.display(),
+                    path_id,
+                );
+                writeln!(&mut text, "{}", e)?;
             }
         }
     }

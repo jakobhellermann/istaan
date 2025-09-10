@@ -65,6 +65,13 @@ impl<T> OldNew<T> {
             same,
         }
     }
+
+    pub fn max(self) -> T
+    where
+        T: Ord,
+    {
+        std::cmp::max(self.old, self.new)
+    }
 }
 
 pub struct Changes<T> {

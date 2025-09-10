@@ -1,6 +1,7 @@
 #![feature(str_split_whitespace_remainder, path_add_extension)]
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use anyhow::{Context as _, Result, anyhow, ensure};
 use clap::Parser;
@@ -101,7 +102,12 @@ fn main() -> Result<()> {
         None => {
             println!("AppId: {}", app.app_id);
             for manifest in &app.manifests {
-                println!("- {} ({})", manifest.manifest.id, manifest.manifest.date);
+                println!(
+                    "- {} ({}) {}",
+                    manifest.manifest.id,
+                    manifest.manifest.date,
+                    manifest.path.display()
+                );
             }
         }
         Some(Command::Diff {
@@ -115,7 +121,9 @@ fn main() -> Result<()> {
                     .find(|m| m.manifest.id == id)
                     .context(format!("manifest {} does not exist", id))
             })?;
-            diff(files, Path::new("diff"))?;
+            let start = Instant::now();
+            diff(files, Path::new("diff")).context("Failed to generate diff")?;
+            println!("Diffed all files in {:?}", start.elapsed())
         }
     }
 
@@ -123,7 +131,8 @@ fn main() -> Result<()> {
 }
 
 fn diff(manifest_files: OldNew<&ManifestFiles>, diff_out_dir: &Path) -> Result<()> {
-    std::fs::remove_dir_all(diff_out_dir)?;
+    let _ = std::fs::remove_dir_all(diff_out_dir);
+    std::fs::create_dir_all(diff_out_dir)?;
 
     let tpk = TypeTreeCache::new(TpkTypeTreeBlob::embedded());
     let unity_game = manifest_files
@@ -147,11 +156,17 @@ fn diff(manifest_files: OldNew<&ManifestFiles>, diff_out_dir: &Path) -> Result<(
         }
     }
 
+    let filter = "";
+
     file_changes
         .same
         .into_par_iter()
         .map(|path| {
             let manifest_file = manifest_files.map(|x| &x.manifest.files[path]);
+
+            if !path.contains(filter) {
+                return Ok(());
+            }
 
             if manifest_file.map(|file| file.flags).changed() {
                 println!(
@@ -160,7 +175,7 @@ fn diff(manifest_files: OldNew<&ManifestFiles>, diff_out_dir: &Path) -> Result<(
                 );
             }
             if manifest_file.map(|file| &file.sha).changed() {
-                println!("Changed '{path}'",);
+                let start = Instant::now();
 
                 let mut diff_out_file = diff_out_dir.join(path);
                 std::fs::create_dir_all(diff_out_file.parent().unwrap())?;
@@ -172,6 +187,7 @@ fn diff(manifest_files: OldNew<&ManifestFiles>, diff_out_dir: &Path) -> Result<(
                     diff_out_file.add_extension(extension);
                 }
                 std::fs::write(diff_out_file, diff.content)?;
+                println!("Changed '{path}' ({}ms)", start.elapsed().as_millis());
             }
 
             Ok(())

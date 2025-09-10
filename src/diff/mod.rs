@@ -52,7 +52,9 @@ pub fn diff(cx: &Context, path: &Path, data: OldNew<&[u8]>) -> Result<DiffResult
         .transpose()?;
 
     if extension == Some("json") {
-        return Ok(DiffResult::diff_ext(diff_json(data)?));
+        return Ok(DiffResult::diff_ext(diff_json(
+            data.try_map(serde_json::from_slice::<serde_json::Value>)?,
+        )?));
     }
 
     if extension == Some("assets") || file_name == "globalgamemanagers" {
@@ -89,21 +91,30 @@ fn try_diff_text(data: OldNew<&[u8]>) -> Option<String> {
 }
 
 fn diff_text(data: OldNew<&str>) -> String {
-    let context_len = 3;
-    let patch = DiffOptions::new()
-        .set_context_len(context_len)
-        .create_patch(data.old, data.new);
-    let text = PatchFormatter::new()
-        .missing_newline_message(false)
-        .fmt_patch(&patch)
-        .to_string();
-    text.lines().skip(2).collect::<Vec<_>>().join("\n")
+    let len = data.map(str::len).max();
+    let diff = len < 1024 * 32;
+
+    if diff {
+        // let context_len = usize::MAX;
+        let context_len = 10;
+
+        let patch = DiffOptions::new()
+            .set_context_len(context_len)
+            .create_patch(data.old, data.new);
+        let text = PatchFormatter::new()
+            .missing_newline_message(false)
+            .fmt_patch(&patch)
+            .to_string();
+        text.lines().skip(2).collect::<Vec<_>>().join("\n")
+    } else {
+        format!("old: {}\nnew: {}", data.old, data.new)
+    }
 }
 
-fn diff_json(data: OldNew<&[u8]>) -> Result<String> {
+fn diff_json(data: OldNew<serde_json::Value>) -> Result<String> {
     Ok(data
-        .try_map(serde_json::from_slice::<serde_json::Value>)?
         .try_map(|value| serde_json::to_string_pretty(&value))?
         .as_deref()
         .consume(diff_text))
+    // .consume(|data| format!("old: {}\nnew: {}", data.old, data.new)))
 }
