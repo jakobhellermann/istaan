@@ -1,0 +1,21 @@
+[
+  {
+    "label": "Run diff",
+    "command": "cargo",
+    "args": ["run", "--", "diff", "8384590172287463475", "6701825740120558137"],
+    "reveal": "no_focus"
+  },
+  {
+    "label": "Run diff (Release)",
+    "command": "cargo",
+    "args": [
+      "run",
+      "-r",
+      "--",
+      "diff",
+      "8384590172287463475",
+      "6701825740120558137"
+    ],
+    "reveal": "no_focus"
+  }
+]
