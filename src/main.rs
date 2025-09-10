@@ -7,9 +7,11 @@ use anyhow::{Context, Result, anyhow, ensure};
 use clap::Parser;
 
 use crate::depotdownloader_manifest::Manifest;
+use crate::old_new::OldNew;
 
 mod depotdownloader_manifest;
 mod diff;
+mod old_new;
 
 pub fn find_single_file_of_extension(folder: &Path, extension: &str) -> Result<PathBuf> {
     let entries = std::fs::read_dir(folder)?;
@@ -102,39 +104,38 @@ fn main() -> Result<()> {
             manifest_old,
             manifest_new,
         }) => {
-            let manifest_old = app
-                .manifests
-                .iter()
-                .find(|manifest| manifest.manifest.id == manifest_old)
-                .context(format!("manifest {manifest_old} does not exist"))?;
-            let manifest_new = app
-                .manifests
-                .iter()
-                .find(|manifest| manifest.manifest.id == manifest_new)
-                .context(format!("manifest {manifest_new} does not exist"))?;
-            diff(manifest_old, manifest_new, Path::new("diff"))?;
+            let manifest = OldNew::new(manifest_old, manifest_new);
+            let files = manifest.try_map(|id| {
+                app.manifests
+                    .iter()
+                    .find(|m| m.manifest.id == id)
+                    .context(format!("manifest {} does not exist", id))
+            })?;
+            diff(files, Path::new("diff"))?;
         }
     }
 
     Ok(())
 }
 
-fn diff(old: &ManifestFiles, new: &ManifestFiles, diff_out_dir: &Path) -> Result<()> {
+fn diff(manifest_files: OldNew<&ManifestFiles>, diff_out_dir: &Path) -> Result<()> {
     // std::fs::remove_dir_all(diff_out_dir)?;
 
-    let old_files: HashSet<_> = old.manifest.files.keys().collect();
-    let new_files: HashSet<_> = new.manifest.files.keys().collect();
+    let files = manifest_files.map(|files| files.manifest.files.keys().collect::<HashSet<_>>());
 
-    let removed_files: BTreeSet<_> = old_files
-        .difference(&new_files)
+    let removed_files: BTreeSet<_> = files
+        .old
+        .difference(&files.new)
         .map(|x| x.as_str())
         .collect();
-    let added_files: BTreeSet<_> = old_files
-        .difference(&new_files)
+    let added_files: BTreeSet<_> = files
+        .old
+        .difference(&files.new)
         .map(|x| x.as_str())
         .collect();
-    let kept_files: BTreeSet<_> = old_files
-        .intersection(&new_files)
+    let kept_files: BTreeSet<_> = files
+        .old
+        .intersection(&files.new)
         .map(|x| x.as_str())
         .collect();
 
@@ -151,25 +152,23 @@ fn diff(old: &ManifestFiles, new: &ManifestFiles, diff_out_dir: &Path) -> Result
         }
     }
 
-    for file in kept_files {
-        let file_old = &old.manifest.files[file];
-        let file_new = &new.manifest.files[file];
+    for path in kept_files {
+        let manifest_file = manifest_files.map(|x| &x.manifest.files[path]);
 
-        if file_old.flags != file_new.flags {
+        if manifest_file.map(|file| file.flags).changed() {
             println!(
-                "Changed '{file}' flags from {:b} to {:b}",
-                file_old.flags, file_new.flags
+                "Changed '{path}' flags from {:b} to {:b}",
+                manifest_file.old.flags, manifest_file.new.flags
             );
         }
-        if file_old.sha != file_new.sha {
-            println!("Changed '{file}'",);
+        if manifest_file.map(|file| &file.sha).changed() {
+            println!("Changed '{path}'",);
 
-            let mut diff_out_file = diff_out_dir.join(file);
+            let mut diff_out_file = diff_out_dir.join(path);
             std::fs::create_dir_all(diff_out_file.parent().unwrap())?;
 
-            let old_data = std::fs::read(old.path.join(file))?;
-            let new_data = std::fs::read(new.path.join(file))?;
-            let diff = diff::diff(Path::new(file), &old_data, &new_data)?;
+            let data = manifest_files.try_map(|f| std::fs::read(f.path.join(path)))?;
+            let diff = diff::diff(Path::new(path), data.as_deref())?;
 
             if let Some(extension) = diff.extension {
                 diff_out_file.add_extension(extension);

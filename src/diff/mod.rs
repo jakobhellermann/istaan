@@ -4,6 +4,8 @@ use anstream::eprintln;
 use anyhow::Result;
 use diffy::{DiffOptions, PatchFormatter};
 
+use crate::old_new::OldNew;
+
 pub struct DiffResult {
     pub content: String,
     pub extension: Option<&'static str>,
@@ -28,12 +30,12 @@ impl From<String> for DiffResult {
     }
 }
 
-pub fn diff(path: &Path, old: &[u8], new: &[u8]) -> Result<DiffResult> {
+pub fn diff(path: &Path, data: OldNew<&[u8]>) -> Result<DiffResult> {
     if path.extension().is_some_and(|ext| ext == "json") {
-        return Ok(DiffResult::diff_ext(diff_json(old, new)?));
+        return Ok(DiffResult::diff_ext(diff_json(data)?));
     }
 
-    if let Some(content) = try_diff_text(&old, &new)? {
+    if let Some(content) = try_diff_text(data) {
         return Ok(DiffResult::diff_ext(content));
     }
 
@@ -50,19 +52,12 @@ pub fn diff(path: &Path, old: &[u8], new: &[u8]) -> Result<DiffResult> {
     })
 }
 
-fn try_diff_text(old: &[u8], new: &[u8]) -> Result<Option<String>> {
-    let Ok(old) = str::from_utf8(old) else {
-        return Ok(None);
-    };
-    let Ok(new) = str::from_utf8(new) else {
-        return Ok(None);
-    };
-
-    Ok(Some(diff_text(old, new)))
+fn try_diff_text(data: OldNew<&[u8]>) -> Option<String> {
+    data.try_map(str::from_utf8).ok().map(diff_text)
 }
 
-fn diff_text(old: &str, new: &str) -> String {
-    let patch = DiffOptions::new().create_patch(old, new);
+fn diff_text(data: OldNew<&str>) -> String {
+    let patch = DiffOptions::new().create_patch(data.old, data.new);
     let text = PatchFormatter::new()
         .missing_newline_message(false)
         .fmt_patch(&patch)
@@ -70,12 +65,10 @@ fn diff_text(old: &str, new: &str) -> String {
     text.lines().skip(2).collect::<Vec<_>>().join("\n")
 }
 
-fn diff_json(old: &[u8], new: &[u8]) -> Result<String> {
-    let old: serde_json::Value = serde_json::from_slice(old)?;
-    let new: serde_json::Value = serde_json::from_slice(new)?;
-
-    let old_pretty = serde_json::to_string_pretty(&old)?;
-    let new_pretty = serde_json::to_string_pretty(&new)?;
-
-    Ok(diff_text(&old_pretty, &new_pretty))
+fn diff_json(data: OldNew<&[u8]>) -> Result<String> {
+    Ok(data
+        .try_map(serde_json::from_slice::<serde_json::Value>)?
+        .try_map(|value| serde_json::to_string_pretty(&value))?
+        .as_deref()
+        .consume(diff_text))
 }
