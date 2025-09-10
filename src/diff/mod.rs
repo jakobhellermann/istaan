@@ -1,10 +1,20 @@
+mod unity;
 use std::path::Path;
 
 use anstream::eprintln;
-use anyhow::Result;
+use anyhow::{Context as _, Result};
 use diffy::{DiffOptions, PatchFormatter};
+use rabex_env::{
+    Environment,
+    game_files::GameFiles,
+    rabex::{tpk::TpkTypeTreeBlob, typetree::typetree_cache::sync::TypeTreeCache},
+};
 
 use crate::old_new::OldNew;
+
+pub struct Context<'a> {
+    pub unity_game: Option<OldNew<Environment<GameFiles, &'a TypeTreeCache<TpkTypeTreeBlob>>>>,
+}
 
 pub struct DiffResult {
     pub content: String,
@@ -30,9 +40,31 @@ impl From<String> for DiffResult {
     }
 }
 
-pub fn diff(path: &Path, data: OldNew<&[u8]>) -> Result<DiffResult> {
-    if path.extension().is_some_and(|ext| ext == "json") {
+pub fn diff(cx: &Context, path: &Path, data: OldNew<&[u8]>) -> Result<DiffResult> {
+    let file_name = path
+        .file_name()
+        .context("file has no filename")?
+        .to_str()
+        .context("non-utf8 filename")?;
+    let extension = path
+        .extension()
+        .map(|e| e.to_str().context("non-utf8 extension"))
+        .transpose()?;
+
+    if extension == Some("json") {
         return Ok(DiffResult::diff_ext(diff_json(data)?));
+    }
+
+    if extension == Some("assets") || file_name == "globalgamemanagers" {
+        return unity::diff_serializedfile(cx, path, data)
+            .map(DiffResult::diff_ext)
+            .context("failed to diff unity serializedfile");
+    }
+
+    if extension == Some("bundle") {
+        return unity::diff_bundlefile(cx, path, data)
+            .map(DiffResult::diff_ext)
+            .context("failed to diff unity bundlefile");
     }
 
     if let Some(content) = try_diff_text(data) {
@@ -57,7 +89,10 @@ fn try_diff_text(data: OldNew<&[u8]>) -> Option<String> {
 }
 
 fn diff_text(data: OldNew<&str>) -> String {
-    let patch = DiffOptions::new().create_patch(data.old, data.new);
+    let context_len = 3;
+    let patch = DiffOptions::new()
+        .set_context_len(context_len)
+        .create_patch(data.old, data.new);
     let text = PatchFormatter::new()
         .missing_newline_message(false)
         .fmt_patch(&patch)

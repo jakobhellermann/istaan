@@ -1,12 +1,15 @@
 #![feature(str_split_whitespace_remainder, path_add_extension)]
-use std::collections::{BTreeSet, HashSet};
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, anyhow, ensure};
+use anyhow::{Context as _, Result, anyhow, ensure};
 use clap::Parser;
+use rabex_env::Environment;
+use rabex_env::rabex::tpk::TpkTypeTreeBlob;
+use rabex_env::rabex::typetree::typetree_cache::sync::TypeTreeCache;
 
 use crate::depotdownloader_manifest::Manifest;
+use crate::diff::Context;
 use crate::old_new::OldNew;
 
 mod depotdownloader_manifest;
@@ -121,38 +124,29 @@ fn main() -> Result<()> {
 fn diff(manifest_files: OldNew<&ManifestFiles>, diff_out_dir: &Path) -> Result<()> {
     // std::fs::remove_dir_all(diff_out_dir)?;
 
-    let files = manifest_files.map(|files| files.manifest.files.keys().collect::<HashSet<_>>());
+    let tpk = TypeTreeCache::new(TpkTypeTreeBlob::embedded());
+    let unity_game = manifest_files
+        .try_map(|files| Environment::new_in(&files.path, &tpk))
+        .ok();
 
-    let removed_files: BTreeSet<_> = files
-        .old
-        .difference(&files.new)
-        .map(|x| x.as_str())
-        .collect();
-    let added_files: BTreeSet<_> = files
-        .old
-        .difference(&files.new)
-        .map(|x| x.as_str())
-        .collect();
-    let kept_files: BTreeSet<_> = files
-        .old
-        .intersection(&files.new)
-        .map(|x| x.as_str())
-        .collect();
+    let cx = Context { unity_game };
 
-    if !removed_files.is_empty() {
-        println!("Removed {} files:", removed_files.len());
-        for file in &removed_files {
+    let file_changes = manifest_files.changes(|files| files.manifest.files.keys());
+
+    if !file_changes.removed.is_empty() {
+        println!("Removed {} files:", file_changes.removed.len());
+        for file in &file_changes.removed {
             println!("- {}", file);
         }
     }
-    if !added_files.is_empty() {
-        println!("Added {} files:", added_files.len());
-        for file in &added_files {
+    if !file_changes.added.is_empty() {
+        println!("Added {} files:", file_changes.added.len());
+        for file in &file_changes.added {
             println!("- {}", file);
         }
     }
 
-    for path in kept_files {
+    for path in file_changes.same {
         let manifest_file = manifest_files.map(|x| &x.manifest.files[path]);
 
         if manifest_file.map(|file| file.flags).changed() {
@@ -168,7 +162,7 @@ fn diff(manifest_files: OldNew<&ManifestFiles>, diff_out_dir: &Path) -> Result<(
             std::fs::create_dir_all(diff_out_file.parent().unwrap())?;
 
             let data = manifest_files.try_map(|f| std::fs::read(f.path.join(path)))?;
-            let diff = diff::diff(Path::new(path), data.as_deref())?;
+            let diff = diff::diff(&cx, Path::new(path), data.as_deref())?;
 
             if let Some(extension) = diff.extension {
                 diff_out_file.add_extension(extension);

@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use std::ops::Deref;
+use std::{collections::BTreeSet, ops::Deref};
 
 #[derive(Clone, Copy)]
 pub struct OldNew<T> {
@@ -17,6 +17,12 @@ impl<T> OldNew<T> {
             new: f(self.new),
         }
     }
+    pub fn map_zip<U, O>(self, other: &OldNew<O>, mut f: impl FnMut(T, &O) -> U) -> OldNew<U> {
+        OldNew {
+            old: f(self.old, &other.old),
+            new: f(self.new, &other.new),
+        }
+    }
     pub fn as_ref(&self) -> OldNew<&T> {
         OldNew {
             old: &self.old,
@@ -29,9 +35,42 @@ impl<T> OldNew<T> {
             new: f(self.new)?,
         })
     }
+    pub fn try_map_zip<U, O, E>(
+        self,
+        other: &OldNew<O>,
+        mut f: impl FnMut(T, &O) -> Result<U, E>,
+    ) -> Result<OldNew<U>, E> {
+        Ok(OldNew {
+            old: f(self.old, &other.old)?,
+            new: f(self.new, &other.new)?,
+        })
+    }
     pub fn consume<R>(self, f: impl FnOnce(Self) -> R) -> R {
         f(self)
     }
+
+    pub fn changes<Iter>(&self, mut f: impl FnMut(&T) -> Iter) -> Changes<Iter::Item>
+    where
+        Iter: Iterator,
+        <Iter as Iterator>::Item: Ord + Copy,
+    {
+        let old_items: BTreeSet<_> = f(&self.old).collect();
+        let new_items: BTreeSet<_> = f(&self.new).collect();
+        let removed: BTreeSet<_> = old_items.difference(&new_items).copied().collect();
+        let added: BTreeSet<_> = new_items.difference(&old_items).copied().collect();
+        let same: BTreeSet<_> = old_items.intersection(&new_items).copied().collect();
+        Changes {
+            removed,
+            added,
+            same,
+        }
+    }
+}
+
+pub struct Changes<T> {
+    pub removed: BTreeSet<T>,
+    pub added: BTreeSet<T>,
+    pub same: BTreeSet<T>,
 }
 
 impl<T: Deref> OldNew<T> {
