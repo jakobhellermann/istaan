@@ -152,14 +152,16 @@ pub fn diff_serializedfile(cx: &Context, path: &Path, data: OldNew<&[u8]>) -> Re
                         write!(&mut text, " (previously {:?})", class_id.old)?;
                         major_change = true;
                     }
-                    if let Some(script) = &script.new {
-                        write!(&mut text, " {}", script.full_name())?;
-                    }
-                    if script.changed()
-                        && let Some(script) = &script.old
-                    {
-                        major_change = true;
-                        write!(&mut text, " (previously {})", script.full_name())?;
+                    if let Some(script_new) = &script.new {
+                        let script_new_name = script_new.full_name();
+                        write!(&mut text, " {}", script_new_name)?;
+                        if let Some(script_old) = &script.old {
+                            let script_old_name = script_old.full_name();
+                            if script_new_name != script_old_name {
+                                major_change = true;
+                                write!(&mut text, " (previously {})", script_new.full_name())?;
+                            }
+                        }
                     }
                     write!(&mut text, " {}", name.new)?;
                     if name.changed() {
