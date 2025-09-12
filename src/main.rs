@@ -144,7 +144,7 @@ fn diff(manifest_files: OldNew<&ManifestFiles>, diff_out_dir: &Path) -> Result<(
 
     let cx = Context {
         // file_filter: "dataassets".into(),
-        file_filter: "ant".into(),
+        file_filter: "".into(),
 
         text_diff_context_size: 6,
 

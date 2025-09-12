@@ -1,16 +1,20 @@
+use std::collections::HashSet;
+use std::fmt::Write;
 use std::io::Cursor;
 use std::path::Path;
-use std::{collections::HashSet, fmt::Write};
 
 use anstream::eprintln;
 use anstyle::{Color, Style};
 use anyhow::{Context as _, Result};
 use rabex::files::bundlefile::{BundleFileReader, ExtractionConfig};
-use rabex::objects::ClassId;
+use rabex::objects::{ClassId, TypedPPtr};
 use rabex::serde_typetree;
+use rabex::typetree::TypeTreeProvider;
 use rabex_env::handle::ObjectRefHandle;
+use rabex_env::resolver::BasedirEnvResolver;
+use rabex_env::unity::types::GameObject;
 use rabex_env::{handle::SerializedFileHandle, rabex::files::SerializedFile};
-use serde_derive::Deserialize;
+use serde::Deserialize;
 
 use crate::old_new::OldNew;
 
@@ -33,8 +37,10 @@ pub fn diff_serializedfile(cx: &Context, path: &Path, data: OldNew<&[u8]>) -> Re
 
     let old_reader = &mut Cursor::new(data.old);
     let new_reader = &mut Cursor::new(data.new);
-    let old = SerializedFile::from_reader(old_reader)?;
-    let new = SerializedFile::from_reader(new_reader)?;
+    let mut old = SerializedFile::from_reader(old_reader)?;
+    let mut new = SerializedFile::from_reader(new_reader)?;
+    old.m_UnityVersion.get_or_insert(env.old.unity_version()?);
+    new.m_UnityVersion.get_or_insert(env.new.unity_version()?);
 
     let old = SerializedFileHandle::new(&env.old, &old, data.old);
     let new = SerializedFileHandle::new(&env.new, &new, data.new);
@@ -77,33 +83,28 @@ pub fn diff_serializedfile(cx: &Context, path: &Path, data: OldNew<&[u8]>) -> Re
     }
 
     for added in object_changes.added {
-        let new_object = file.new.object_at::<serde_json::Value>(added)?;
+        let object = file.new.object_at::<serde_json::Value>(added)?;
 
-        if cx.unity_filter.matches(&new_object) {
-            let new_value = new_object.read()?;
-            let name = new_value.get("m_Name").and_then(serde_json::Value::as_str);
-            let script = new_object.mono_script()?;
+        if cx.unity_filter.matches(&object) {
+            let val = object.read()?;
+            let script = object.mono_script()?;
+            let name = name(&object, &val)?;
 
-            write!(&mut text, "--- added {:?}", new_object.class_id())?;
+            write!(&mut text, "--- added {:?}", object.class_id())?;
             if let Some(script) = &script {
                 write!(&mut text, " {}", script.full_name())?;
             }
-            if let Some(name) = &name {
-                write!(&mut text, " {name}")?;
-            }
+            write!(&mut text, " {name}")?;
             writeln!(&mut text, " ---")?;
 
-            writeln!(&mut text, "{}", serde_json::to_string_pretty(&new_value)?)?;
+            writeln!(&mut text, "{}", serde_json::to_string_pretty(&val)?)?;
         } else {
-            let name = new_object
-                .cast::<Named>()
-                .read()
-                .map(|x| x.name)
-                .unwrap_or_default();
+            let val = object.read()?;
+            let name = name(&object, &val)?;
             writeln!(
                 &mut text,
-                "--- added {:?} '{}' ---",
-                new_object.object.info.m_ClassID, name
+                "--- added {:?} {} ---",
+                object.object.info.m_ClassID, name
             )?;
         }
     }
@@ -134,12 +135,8 @@ pub fn diff_serializedfile(cx: &Context, path: &Path, data: OldNew<&[u8]>) -> Re
                 let value = OldNew::new(old_value, new_value);
                 let value = value.as_ref();
 
-                let name = value.map(|val| {
-                    val.get("m_Name")
-                        .and_then(serde_json::Value::as_str)
-                        .unwrap_or_default()
-                });
-                let script = object.new.mono_script()?;
+                let name = object.try_map_zip(&value, |object, val| name(object, val))?;
+                let script = object.try_map(|obj| obj.mono_script())?;
 
                 let matches_filter = cx.unity_filter.matches(&object.new);
                 let diff = matches_filter
@@ -155,12 +152,18 @@ pub fn diff_serializedfile(cx: &Context, path: &Path, data: OldNew<&[u8]>) -> Re
                         write!(&mut text, " (previously {:?})", class_id.old)?;
                         major_change = true;
                     }
-                    if let Some(script) = &script {
+                    if let Some(script) = &script.new {
                         write!(&mut text, " {}", script.full_name())?;
                     }
-                    write!(&mut text, " '{}'", name.new)?;
+                    if script.changed()
+                        && let Some(script) = &script.old
+                    {
+                        major_change = true;
+                        write!(&mut text, " (previously {})", script.full_name())?;
+                    }
+                    write!(&mut text, " {}", name.new)?;
                     if name.changed() {
-                        write!(&mut text, " (previously '{}')", name.old)?;
+                        write!(&mut text, " (previously {})", name.old)?;
                         major_change = true;
                     }
                     writeln!(&mut text, " ---")?;
@@ -185,7 +188,6 @@ pub fn diff_serializedfile(cx: &Context, path: &Path, data: OldNew<&[u8]>) -> Re
                     path.display(),
                     path_id,
                 );
-                writeln!(&mut text, "{}", e)?;
             }
         }
     }
@@ -282,8 +284,31 @@ pub mod format {
     }
 }
 
-#[derive(Deserialize)]
-struct Named {
-    #[serde(rename = "m_Name")]
-    name: String,
+fn name<R: BasedirEnvResolver, P: TypeTreeProvider>(
+    object: &ObjectRefHandle<serde_json::Value, R, P>,
+    val: &serde_json::Value,
+) -> Result<String> {
+    let name = val
+        .get("m_Name")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let mut result = String::with_capacity(name.len() + 2);
+    if !name.is_empty() {
+        result.push('\'');
+        result.push_str(name);
+        result.push('\'');
+    }
+
+    if let Some(go) = val.get("m_GameObject") {
+        let go = TypedPPtr::<GameObject>::deserialize(go)?;
+        if let Some(go) = object.file.deref_optional(go)? {
+            let path = go.path()?;
+            if !result.is_empty() {
+                result.push(' ');
+            }
+            write!(&mut result, "on '{path}'")?;
+        }
+    }
+
+    Ok(result)
 }
