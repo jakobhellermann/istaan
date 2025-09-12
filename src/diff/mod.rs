@@ -4,6 +4,7 @@ use std::path::Path;
 use anstream::eprintln;
 use anyhow::{Context as _, Result};
 use diffy::{DiffOptions, PatchFormatter};
+use json_diff_ng::DiffType;
 use rabex_env::{
     Environment,
     game_files::GameFiles,
@@ -112,9 +113,35 @@ fn diff_text(data: OldNew<&str>) -> String {
 }
 
 fn diff_json(data: OldNew<serde_json::Value>) -> Result<String> {
-    Ok(data
-        .try_map(|value| serde_json::to_string_pretty(&value))?
-        .as_deref()
-        .consume(diff_text))
+    use std::fmt::Write;
+
+    let diffs = json_diff_ng::compare_serde_values(&data.old, &data.new, false, &[])?;
+    let mut f = String::new();
+    for (diff_type, diff_path) in diffs.all_diffs() {
+        write!(&mut f, "{}: ", diff_type)?;
+
+        for element in &diff_path.path {
+            write!(&mut f, ".{element}")?;
+        }
+        if let Some((left, right)) = &diff_path.values {
+            if left != right {
+                write!(f, " {left} -> {right}")?;
+            } else {
+                write!(f, " {left}")?;
+            }
+        } else {
+            let val = match diff_type {
+                DiffType::LeftExtra => diff_path.resolve(&data.old),
+                DiffType::RightExtra => diff_path.resolve(&data.new),
+                _ => None,
+            };
+            if let Some(val) = val {
+                write!(f, " {val}")?;
+            }
+        }
+        f.push('\n');
+    }
+
+    Ok(f)
     // .consume(|data| format!("old: {}\nnew: {}", data.old, data.new)))
 }
