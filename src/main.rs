@@ -92,6 +92,8 @@ struct Cli {
 #[derive(clap::Parser)]
 enum Command {
     Diff {
+        #[clap(long, short, default_value = "diff")]
+        out_dir: PathBuf,
         manifest_old: String,
         manifest_new: String,
     },
@@ -114,6 +116,7 @@ fn main() -> Result<()> {
             }
         }
         Some(Command::Diff {
+            out_dir,
             manifest_old,
             manifest_new,
         }) => {
@@ -124,7 +127,7 @@ fn main() -> Result<()> {
                     .find(|m| m.manifest.id == id)
                     .context(format!("manifest {} does not exist", id))
             })?;
-            let out_dir = Path::new("diff").join(format!(
+            let out_dir = out_dir.join(format!(
                 "{} to {}",
                 files.old.manifest.date.date(),
                 files.new.manifest.date.date()
