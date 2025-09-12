@@ -1,4 +1,6 @@
+pub mod cs;
 pub mod unity;
+
 use std::path::Path;
 
 use anstream::eprintln;
@@ -23,6 +25,8 @@ pub struct Context<'a> {
     /// Ignore new values of `0`, `[]`, etc.
     pub json_ignore_new_default: bool,
     pub json_sort: bool,
+
+    pub cs_decompile_assembly: bool,
 
     pub unity_game: Option<OldNew<Environment<GameFiles, &'a TypeTreeCache<TpkTypeTreeBlob>>>>,
     pub unity_filter: unity::Filter,
@@ -62,6 +66,11 @@ pub fn diff(cx: &Context, path: &Path, data: OldNew<&[u8]>) -> Result<DiffResult
         .extension()
         .map(|e| e.to_str().context("non-utf8 extension"))
         .transpose()?;
+
+    if extension == Some("dll") && cx.cs_decompile_assembly {
+        let diff = cs::diff_assembly(cx, data)?;
+        return Ok(DiffResult::diff_ext(diff));
+    }
 
     if extension == Some("json") {
         return Ok(DiffResult::diff_ext(diff_json(

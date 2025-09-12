@@ -137,6 +137,8 @@ fn diff(manifest_files: OldNew<&ManifestFiles>, diff_out_dir: &Path) -> Result<(
         json_ignore_new_default: true,
         json_sort: false,
 
+        cs_decompile_assembly: true,
+
         unity_game,
         unity_filter: diff::unity::Filter {
             ignore_classes: HashSet::from_iter([

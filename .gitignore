@@ -2,4 +2,5 @@
 
 /data
 /diff
+/out*
 !/data/download.sh
