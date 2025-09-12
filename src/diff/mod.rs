@@ -142,8 +142,8 @@ fn diff_json(cx: &Context, data: OldNew<&serde_json::Value>) -> Result<String> {
     use std::fmt::Write;
 
     let diffs = json_diff_ng::compare_serde_values(
-        &data.old,
-        &data.new,
+        data.old,
+        data.new,
         cx.json_sort,
         cx.json_ignore_regex.clone().as_slice(),
     )?;
@@ -157,7 +157,7 @@ fn diff_json(cx: &Context, data: OldNew<&serde_json::Value>) -> Result<String> {
         if cx.json_ignore_new_default
             && let DiffType::RightExtra = diff_type
         {
-            match diff_path.resolve(&data.new) {
+            match diff_path.resolve(data.new) {
                 Some(new_value) => {
                     if is_json_default(new_value) {
                         continue;
@@ -201,8 +201,8 @@ fn diff_json(cx: &Context, data: OldNew<&serde_json::Value>) -> Result<String> {
             }
         } else {
             let val = match diff_type {
-                DiffType::LeftExtra => diff_path.resolve(&data.old),
-                DiffType::RightExtra => diff_path.resolve(&data.new),
+                DiffType::LeftExtra => diff_path.resolve(data.old),
+                DiffType::RightExtra => diff_path.resolve(data.new),
                 _ => None,
             };
             if let Some(val) = val {
@@ -218,7 +218,7 @@ fn diff_json(cx: &Context, data: OldNew<&serde_json::Value>) -> Result<String> {
 fn is_json_default(new_value: &serde_json::Value) -> bool {
     match new_value {
         serde_json::Value::Null => true,
-        serde_json::Value::Bool(bool) => *bool == false,
+        serde_json::Value::Bool(bool) => !*bool,
         serde_json::Value::Number(number) => number.as_u64() == Some(0),
         serde_json::Value::String(str) => str.is_empty(),
         serde_json::Value::Array(arr) => arr.is_empty(),

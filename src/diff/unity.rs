@@ -120,8 +120,8 @@ pub fn diff_serializedfile(cx: &Context, path: &Path, data: OldNew<&[u8]>) -> Re
             obj.object.get_raw_data(&mut file.reader())
         })?;
 
-        if data.changed() {
-            if let Err(e) = (|| -> Result<()> {
+        if data.changed()
+            && let Err(e) = (|| -> Result<()> {
                 let old_value = serde_typetree::from_reader_endianed::<serde_json::Value>(
                     &mut Cursor::new(data.old),
                     &object.old.object.tt,
@@ -138,7 +138,7 @@ pub fn diff_serializedfile(cx: &Context, path: &Path, data: OldNew<&[u8]>) -> Re
                 let name = object.try_map_zip(&value, |object, val| name(object, val))?;
                 let script = object.try_map(|obj| obj.mono_script())?;
 
-                let matches_filter = cx.unity_filter.matches(&object.new);
+                let matches_filter = cx.unity_filter.matches(object.new);
                 let diff = matches_filter
                     .then(|| super::diff_json(cx, value))
                     .transpose()?
@@ -191,7 +191,6 @@ pub fn diff_serializedfile(cx: &Context, path: &Path, data: OldNew<&[u8]>) -> Re
                     path_id,
                 );
             }
-        }
     }
 
     Ok(text)
