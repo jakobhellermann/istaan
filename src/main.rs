@@ -124,8 +124,14 @@ fn main() -> Result<()> {
                     .find(|m| m.manifest.id == id)
                     .context(format!("manifest {} does not exist", id))
             })?;
+            let out_dir = Path::new("diff").join(format!(
+                "{} to {}",
+                files.old.manifest.date.date(),
+                files.new.manifest.date.date()
+            ));
+
             let start = Instant::now();
-            diff(files, Path::new("diff")).context("Failed to generate diff")?;
+            diff(files, &out_dir).context("Failed to generate diff")?;
             println!("Diffed all files in {:?}", start.elapsed())
         }
     }
