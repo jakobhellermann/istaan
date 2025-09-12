@@ -1,10 +1,9 @@
 #![feature(str_split_whitespace_remainder, path_add_extension)]
 use std::collections::HashSet;
-use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use anyhow::{Context as _, Result, anyhow, ensure};
+use anyhow::{Context as _, Result, anyhow};
 use clap::Parser;
 use rabex::objects::ClassId;
 use rabex_env::Environment;
@@ -38,7 +37,6 @@ pub fn find_single_file_of_extension(folder: &Path, extension: &str) -> Result<P
 }
 
 struct App {
-    app_id: u32,
     manifests: Vec<ManifestFiles>,
 }
 struct ManifestFiles {
@@ -47,29 +45,8 @@ struct ManifestFiles {
 }
 
 fn load() -> Result<App> {
-    let mut app = None;
-    for item in std::fs::read_dir("data/depots")? {
-        let item = item?;
-        if !item.file_type()?.is_dir() {
-            continue;
-        }
-
-        let item = item.path();
-        let Some(app_id) = item
-            .file_name()
-            .and_then(OsStr::to_str)
-            .and_then(|name| name.parse::<u32>().ok())
-        else {
-            continue;
-        };
-
-        ensure!(!app.is_some(), "Multiple app ids found in data folder");
-        app = Some((app_id, item));
-    }
-    let (app_id, app_path) = app.context("no app data found in data folder")?;
-
     let mut manifests = Vec::new();
-    for manifest in std::fs::read_dir(&app_path)? {
+    for manifest in std::fs::read_dir("data/manifests")? {
         let manifest_dir = manifest?.path();
         let manifest_path = find_single_file_of_extension(&manifest_dir, "txt")?;
         let manifest = std::fs::read_to_string(manifest_path)?;
@@ -79,8 +56,9 @@ fn load() -> Result<App> {
             manifest,
         });
     }
+    manifests.sort_by_key(|a| a.manifest.date);
 
-    Ok(App { app_id, manifests })
+    Ok(App { manifests })
 }
 
 #[derive(clap::Parser)]
@@ -105,13 +83,11 @@ fn main() -> Result<()> {
 
     match cli.command {
         None => {
-            println!("AppId: {}", app.app_id);
             for manifest in &app.manifests {
                 println!(
-                    "- {} ({}) {}",
+                    "- {} ({})",
                     manifest.manifest.id,
                     manifest.manifest.date.date(),
-                    manifest.path.display()
                 );
             }
         }

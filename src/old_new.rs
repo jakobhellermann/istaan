@@ -74,6 +74,7 @@ impl<T> OldNew<T> {
     }
 }
 
+#[derive(Debug)]
 pub struct Changes<T> {
     pub removed: BTreeSet<T>,
     pub added: BTreeSet<T>,
