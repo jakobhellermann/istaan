@@ -17,6 +17,7 @@ json_diff_ng = { version = "0.6", default-features = false }
 regex = { version = "1.11.2", default-features = false, features = ["perf", "std"] }
 serde_derive = "1.0.219"
 serde = "1.0.219"
+jiff = { version = "0.2.15", default-features = false, features = ["std"] }
 
 [patch."https://github.com/jakobhellermann/rabex-env"]
 rabex-env = { path = "/home/jakob/dev/unity/rabex-env" }

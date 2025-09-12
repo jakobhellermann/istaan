@@ -1,10 +1,11 @@
 use anyhow::{Context, Result, ensure};
+use jiff::civil::DateTime;
 use std::collections::BTreeMap;
 
 #[derive(Debug)]
 pub struct Manifest {
     pub id: String,
-    pub date: String,
+    pub date: DateTime,
     pub files: BTreeMap<String, ManifestFile>,
 }
 #[derive(Debug)]
@@ -43,9 +44,11 @@ impl Manifest {
             files.insert(path.to_owned(), ManifestFile { size, flags, sha });
         }
 
+        let date = DateTime::strptime("%m/%d/%Y %H:%M:%S", date)?;
+
         Ok(Manifest {
             id: id.to_owned(),
-            date: date.to_owned(),
+            date,
             files,
         })
     }

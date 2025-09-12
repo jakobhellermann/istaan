@@ -108,7 +108,7 @@ fn main() -> Result<()> {
                 println!(
                     "- {} ({}) {}",
                     manifest.manifest.id,
-                    manifest.manifest.date,
+                    manifest.manifest.date.date(),
                     manifest.path.display()
                 );
             }
