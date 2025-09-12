@@ -7,8 +7,8 @@ use anstream::eprintln;
 use anstyle::{Color, Style};
 use anyhow::{Context as _, Result};
 use rabex::files::bundlefile::{BundleFileReader, ExtractionConfig};
-use rabex::objects::pptr::PathId;
-use rabex::objects::{ClassId, TypedPPtr};
+use rabex::objects::pptr::{FileId, PathId};
+use rabex::objects::{ClassId, PPtr, TypedPPtr};
 use rabex::serde_typetree;
 use rabex::typetree::TypeTreeProvider;
 use rabex_env::game_files::GameFiles;
@@ -175,13 +175,16 @@ impl<'a, P: TypeTreeProvider> SceneMatcher<'a, P> {
                 &comp.file.data[start..start + comp.object.info.m_Size as usize]
             });
             if data.changed() {
-                let value = data.try_map_zip(&comp, |data, comp| {
+                let mut value = data.try_map_zip(&comp, |data, comp| {
                     serde_typetree::from_reader_endianed::<serde_json::Value>(
                         &mut Cursor::new(data),
                         &comp.object.tt,
                         comp.file.file.m_Header.m_Endianess,
                     )
                 })?;
+
+                qualify_pptrs(&self.file.old, &mut value.old).context("qualifying pptrs")?;
+                qualify_pptrs(&self.file.new, &mut value.new).context("qualifying pptrs")?;
 
                 let diff = super::diff_json(self.cx, value.as_ref())?;
                 if !diff.is_empty() {
@@ -373,7 +376,7 @@ fn diff_serializedfile_old(cx: &Context, path: &Path, data: OldNew<&[u8]>) -> Re
         let object = file.new.object_at::<serde_json::Value>(added)?;
 
         if cx.unity_filter.matches(&object) {
-            let val = object.read()?;
+            let mut val = object.read()?;
             let script = object.mono_script()?;
             let name = name(&object, &val)?;
 
@@ -383,6 +386,8 @@ fn diff_serializedfile_old(cx: &Context, path: &Path, data: OldNew<&[u8]>) -> Re
             }
             write!(&mut text, " {name}")?;
             writeln!(&mut text, " ---")?;
+
+            qualify_pptrs(file.new, &mut val)?;
 
             writeln!(&mut text, "{}", serde_json::to_string_pretty(&val)?)?;
         } else {
@@ -419,15 +424,18 @@ fn diff_serializedfile_old(cx: &Context, path: &Path, data: OldNew<&[u8]>) -> Re
                     &object.new.object.tt,
                     object.new.file.file.m_Header.m_Endianess,
                 )?;
-                let value = OldNew::new(old_value, new_value);
-                let value = value.as_ref();
+
+                let mut value = OldNew::new(old_value, new_value);
 
                 let name = object.try_map_zip(&value, |object, val| name(object, val))?;
                 let script = object.try_map(|obj| obj.mono_script())?;
 
+                qualify_pptrs(file.old, &mut value.old)?;
+                qualify_pptrs(file.new, &mut value.new)?;
+
                 let matches_filter = cx.unity_filter.matches(object.new);
                 let diff = matches_filter
-                    .then(|| super::diff_json(cx, value))
+                    .then(|| super::diff_json(cx, value.as_ref()))
                     .transpose()?
                     .filter(|diff| !diff.is_empty());
 
@@ -595,10 +603,73 @@ fn name<R: BasedirEnvResolver, P: TypeTreeProvider>(
             let path = go.path()?;
             if !result.is_empty() {
                 result.push(' ');
+                write!(&mut result, "on '{path}'")?;
+            } else {
+                write!(&mut result, "{path}")?;
             }
-            write!(&mut result, "on '{path}'")?;
         }
     }
 
     Ok(result)
+}
+
+fn qualify_pptrs<R: BasedirEnvResolver, P: TypeTreeProvider>(
+    file: &SerializedFileHandle<'_, R, P>,
+    value: &mut serde_json::Value,
+) -> Result<()> {
+    replace_pptrs(value, &mut |pptr| {
+        pptr.optional()
+            .map(|pptr| {
+                let obj = file
+                    .deref(pptr.typed::<serde_json::Value>())
+                    .with_context(|| format!("{:?}", pptr))?;
+                let name = obj
+                    .read()
+                    .and_then(|data| name(&obj, &data))
+                    .unwrap_or_else(|_| "Could not determine name".to_string());
+                let ref_path = name;
+
+                if pptr.is_local() {
+                    Ok(serde_json::json!({
+                        "$target": ref_path,
+                        "type": format!("{:?}",obj.class_id()),
+                    }))
+                } else {
+                    let external = pptr
+                        .file_identifier(file.file)
+                        .with_context(|| format!("invalid PPtr: {:?}", pptr))?;
+
+                    Ok(serde_json::json!({
+                        "file": external.pathName.clone(),
+                        "$target": ref_path,
+                        "type": format!("{:?}",obj.class_id()),
+                    }))
+                }
+            })
+            .unwrap_or(Ok(serde_json::Value::Null))
+    })
+}
+
+fn replace_pptrs(
+    value: &mut serde_json::Value,
+    f: &mut dyn FnMut(PPtr) -> Result<serde_json::Value>,
+) -> Result<()> {
+    *value = match value {
+        serde_json::Value::Array(values) => {
+            return values.iter_mut().try_for_each(|x| replace_pptrs(x, f));
+        }
+        serde_json::Value::Object(map) => {
+            if map.len() == 2
+                && let Some(file_id) = map.get("m_FileID").and_then(|x| x.as_number()?.as_i64())
+                && let Some(path_id) = map.get("m_PathID").and_then(|x| x.as_number()?.as_i64())
+            {
+                let pptr = PPtr::new(file_id as FileId, path_id);
+                f(pptr)?
+            } else {
+                return map.values_mut().try_for_each(|x| replace_pptrs(x, f));
+            }
+        }
+        _ => return Ok(()),
+    };
+    Ok(())
 }
