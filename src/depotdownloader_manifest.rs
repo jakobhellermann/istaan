@@ -8,6 +8,7 @@ pub struct Manifest {
     pub date: DateTime,
     pub files: BTreeMap<String, ManifestFile>,
 }
+
 #[derive(Debug)]
 pub struct ManifestFile {
     #[allow(dead_code)]

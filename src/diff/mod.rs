@@ -7,11 +7,10 @@ use anstream::eprintln;
 use anyhow::{Context as _, Result};
 use diffy::{DiffOptions, PatchFormatter};
 use json_diff_ng::DiffType;
-use rabex_env::{
-    Environment,
-    game_files::GameFiles,
-    rabex::{tpk::TpkTypeTreeBlob, typetree::typetree_cache::sync::TypeTreeCache},
-};
+use rabex_env::Environment;
+use rabex_env::game_files::GameFiles;
+use rabex_env::rabex::tpk::TpkTypeTreeBlob;
+use rabex_env::rabex::typetree::typetree_cache::sync::TypeTreeCache;
 use regex::Regex;
 
 use crate::old_new::OldNew;

@@ -10,10 +10,10 @@ use rabex::files::bundlefile::{BundleFileReader, ExtractionConfig};
 use rabex::objects::{ClassId, TypedPPtr};
 use rabex::serde_typetree;
 use rabex::typetree::TypeTreeProvider;
-use rabex_env::handle::ObjectRefHandle;
+use rabex_env::handle::{ObjectRefHandle, SerializedFileHandle};
+use rabex_env::rabex::files::SerializedFile;
 use rabex_env::resolver::BasedirEnvResolver;
 use rabex_env::unity::types::GameObject;
-use rabex_env::{handle::SerializedFileHandle, rabex::files::SerializedFile};
 use serde::Deserialize;
 
 use crate::old_new::OldNew;
@@ -243,7 +243,8 @@ pub fn diff_bundlefile(cx: &Context, path: &Path, data: OldNew<&[u8]>) -> Result
 
 pub mod format {
     #![allow(non_snake_case, dead_code)]
-    use rabex_env::rabex::{UnityVersion, files::SerializedFile as SerializedFileRabex};
+    use rabex_env::rabex::UnityVersion;
+    use rabex_env::rabex::files::SerializedFile as SerializedFileRabex;
 
     #[derive(Debug, Copy, Clone)]
     struct SerializedFileHeader {

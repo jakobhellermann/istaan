@@ -1,4 +1,7 @@
-use std::{collections::BTreeSet, fmt::Write as _, io::Write as _, process::Command};
+use std::collections::BTreeSet;
+use std::fmt::Write as _;
+use std::io::Write as _;
+use std::process::Command;
 
 use crate::diff::Context;
 use crate::old_new::OldNew;
