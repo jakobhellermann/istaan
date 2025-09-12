@@ -304,6 +304,9 @@ dependencies = [
  "rabex",
  "rabex-env",
  "rayon",
+ "regex",
+ "serde",
+ "serde_derive",
  "serde_json",
 ]
 
@@ -458,7 +461,6 @@ dependencies = [
 [[package]]
 name = "rabex"
 version = "0.0.3"
-source = "git+https://github.com/jakobhellermann/RustyAssetBundleEXtractor?branch=all#584137c891f493751ef1587d8a38f723d8b1470e"
 dependencies = [
  "bitflags",
  "byteorder",

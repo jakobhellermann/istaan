@@ -14,6 +14,12 @@ rabex-env = { git = "https://github.com/jakobhellermann/rabex-env" }
 rabex = { git = "https://github.com/jakobhellermann/RustyAssetBundleEXtractor", branch = "all" }
 rayon = "1.11"
 json_diff_ng = { version = "0.6", default-features = false }
+regex = { version = "1.11.2", default-features = false, features = ["perf", "std"] }
+serde_derive = "1.0.219"
+serde = "1.0.219"
 
 [patch."https://github.com/jakobhellermann/rabex-env"]
 rabex-env = { path = "/home/jakob/dev/unity/rabex-env" }
+
+[patch."https://github.com/jakobhellermann/RustyAssetBundleEXtractor"]
+rabex = { path = "/home/jakob/dev/unity/RustyAssetBundleEXtractor" }

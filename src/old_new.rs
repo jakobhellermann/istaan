@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 use std::{collections::BTreeSet, ops::Deref};
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct OldNew<T> {
     pub old: T,
     pub new: T,

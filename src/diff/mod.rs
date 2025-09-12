@@ -1,4 +1,4 @@
-mod unity;
+pub mod unity;
 use std::path::Path;
 
 use anstream::eprintln;
@@ -10,11 +10,22 @@ use rabex_env::{
     game_files::GameFiles,
     rabex::{tpk::TpkTypeTreeBlob, typetree::typetree_cache::sync::TypeTreeCache},
 };
+use regex::Regex;
 
 use crate::old_new::OldNew;
 
 pub struct Context<'a> {
+    pub file_filter: String,
+
+    pub text_diff_context_size: usize,
+
+    pub json_ignore_regex: Option<Regex>,
+    /// Ignore new values of `0`, `[]`, etc.
+    pub json_ignore_new_default: bool,
+    pub json_sort: bool,
+
     pub unity_game: Option<OldNew<Environment<GameFiles, &'a TypeTreeCache<TpkTypeTreeBlob>>>>,
+    pub unity_filter: unity::Filter,
 }
 
 pub struct DiffResult {
@@ -54,7 +65,9 @@ pub fn diff(cx: &Context, path: &Path, data: OldNew<&[u8]>) -> Result<DiffResult
 
     if extension == Some("json") {
         return Ok(DiffResult::diff_ext(diff_json(
-            data.try_map(serde_json::from_slice::<serde_json::Value>)?,
+            cx,
+            data.try_map(serde_json::from_slice::<serde_json::Value>)?
+                .as_ref(),
         )?));
     }
 
@@ -70,37 +83,42 @@ pub fn diff(cx: &Context, path: &Path, data: OldNew<&[u8]>) -> Result<DiffResult
             .context("failed to diff unity bundlefile");
     }
 
-    if let Some(content) = try_diff_text(data) {
+    if let Some(content) = try_diff_text(cx, data) {
         return Ok(DiffResult::diff_ext(content));
     }
 
-    let style =
-        anstyle::Style::new().fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::Yellow)));
+    let style = warn_style();
     eprintln!(
         "{style}Unrecognized binary format: {}{style:#}",
         path.display()
     );
 
     Ok(DiffResult {
-        content: "not yet implemented".into(),
+        content: "binary file differs".into(),
         extension: None,
     })
 }
 
-fn try_diff_text(data: OldNew<&[u8]>) -> Option<String> {
-    data.try_map(str::from_utf8).ok().map(diff_text)
+fn warn_style() -> anstyle::Style {
+    anstyle::Style::new().fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::Yellow)))
 }
 
-fn diff_text(data: OldNew<&str>) -> String {
+fn try_diff_text(cx: &Context, data: OldNew<&[u8]>) -> Option<String> {
+    data.try_map(str::from_utf8)
+        .ok()
+        .map(|data| diff_text(cx, data))
+}
+
+fn diff_text(cx: &Context, data: OldNew<&str>) -> String {
     let len = data.map(str::len).max();
-    let diff = len < 1024 * 32;
+    let threshold = 1024 * 128;
+    let diff = len < threshold;
 
     if diff {
         // let context_len = usize::MAX;
-        let context_len = 10;
 
         let patch = DiffOptions::new()
-            .set_context_len(context_len)
+            .set_context_len(cx.text_diff_context_size)
             .create_patch(data.old, data.new);
         let text = PatchFormatter::new()
             .missing_newline_message(false)
@@ -112,18 +130,62 @@ fn diff_text(data: OldNew<&str>) -> String {
     }
 }
 
-fn diff_json(data: OldNew<serde_json::Value>) -> Result<String> {
+fn diff_json(cx: &Context, data: OldNew<&serde_json::Value>) -> Result<String> {
     use std::fmt::Write;
 
-    let diffs = json_diff_ng::compare_serde_values(&data.old, &data.new, false, &[])?;
+    let diffs = json_diff_ng::compare_serde_values(
+        &data.old,
+        &data.new,
+        cx.json_sort,
+        cx.json_ignore_regex.clone().as_slice(),
+    )?;
     let mut f = String::new();
-    for (diff_type, diff_path) in diffs.all_diffs() {
-        write!(&mut f, "{}: ", diff_type)?;
+
+    let all_diffs = diffs.all_diffs();
+    let all_mismatch = all_diffs
+        .iter()
+        .all(|(diff_type, _)| matches!(diff_type, DiffType::Mismatch));
+    for (diff_type, diff_path) in all_diffs {
+        if cx.json_ignore_new_default
+            && let DiffType::RightExtra = diff_type
+        {
+            match diff_path.resolve(&data.new) {
+                Some(new_value) => {
+                    if is_json_default(new_value) {
+                        continue;
+                    }
+                }
+                None => {
+                    /*let style = warn_style();
+                    eprintln!(
+                        "{style}Couldn't look up path '{}' {style:#}",
+                        diff_path
+                            .path
+                            .iter()
+                            .map(|x| format!(".{x}"))
+                            .collect::<String>()
+                    );*/
+                }
+            }
+        }
+
+        if !f.is_empty() {
+            f.push('\n');
+        }
+
+        let diff_type_msg = match diff_type {
+            DiffType::RootMismatch => "Mismatch at root.",
+            DiffType::LeftExtra => "< ",
+            DiffType::RightExtra => "> ",
+            DiffType::Mismatch if all_mismatch => "",
+            DiffType::Mismatch => "  ",
+        };
+        write!(&mut f, "{}", diff_type_msg)?;
 
         for element in &diff_path.path {
             write!(&mut f, ".{element}")?;
         }
-        if let Some((left, right)) = &diff_path.values {
+        if let Some((left, right)) = diff_path.values {
             if left != right {
                 write!(f, " {left} -> {right}")?;
             } else {
@@ -139,9 +201,19 @@ fn diff_json(data: OldNew<serde_json::Value>) -> Result<String> {
                 write!(f, " {val}")?;
             }
         }
-        f.push('\n');
     }
 
     Ok(f)
     // .consume(|data| format!("old: {}\nnew: {}", data.old, data.new)))
+}
+
+fn is_json_default(new_value: &serde_json::Value) -> bool {
+    match new_value {
+        serde_json::Value::Null => true,
+        serde_json::Value::Bool(bool) => *bool == false,
+        serde_json::Value::Number(number) => number.as_u64() == Some(0),
+        serde_json::Value::String(str) => str.is_empty(),
+        serde_json::Value::Array(arr) => arr.is_empty(),
+        serde_json::Value::Object(map) => map.is_empty(),
+    }
 }

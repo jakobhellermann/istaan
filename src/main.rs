@@ -1,14 +1,17 @@
 #![feature(str_split_whitespace_remainder, path_add_extension)]
+use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use anyhow::{Context as _, Result, anyhow, ensure};
 use clap::Parser;
+use rabex::objects::ClassId;
 use rabex_env::Environment;
 use rabex_env::rabex::tpk::TpkTypeTreeBlob;
 use rabex_env::rabex::typetree::typetree_cache::sync::TypeTreeCache;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use regex::Regex;
 
 use crate::depotdownloader_manifest::Manifest;
 use crate::diff::Context;
@@ -139,7 +142,27 @@ fn diff(manifest_files: OldNew<&ManifestFiles>, diff_out_dir: &Path) -> Result<(
         .try_map(|files| Environment::new_in(&files.path, &tpk))
         .ok();
 
-    let cx = Context { unity_game };
+    let cx = Context {
+        // file_filter: "dataassets".into(),
+        file_filter: "ant".into(),
+
+        text_diff_context_size: 6,
+
+        json_ignore_regex: Some(Regex::new("m_PreloadTable").unwrap()),
+        json_ignore_new_default: true,
+        json_sort: false,
+
+        unity_game,
+        unity_filter: diff::unity::Filter {
+            ignore_classes: HashSet::from_iter([
+                ClassId::Texture2D,
+                ClassId::Sprite,
+                ClassId::SpriteAtlas,
+                ClassId::SpriteRenderer,
+                ClassId::CircleCollider2D,
+            ]),
+        },
+    };
 
     let file_changes = manifest_files.changes(|files| files.manifest.files.keys());
 
@@ -156,15 +179,13 @@ fn diff(manifest_files: OldNew<&ManifestFiles>, diff_out_dir: &Path) -> Result<(
         }
     }
 
-    let filter = "";
-
     file_changes
         .same
         .into_par_iter()
         .map(|path| {
             let manifest_file = manifest_files.map(|x| &x.manifest.files[path]);
 
-            if !path.contains(filter) {
+            if !path.contains(&cx.file_filter) {
                 return Ok(());
             }
 
@@ -183,11 +204,13 @@ fn diff(manifest_files: OldNew<&ManifestFiles>, diff_out_dir: &Path) -> Result<(
                 let data = manifest_files.try_map(|f| std::fs::read(f.path.join(path)))?;
                 let diff = diff::diff(&cx, Path::new(path), data.as_deref())?;
 
-                if let Some(extension) = diff.extension {
-                    diff_out_file.add_extension(extension);
+                if !diff.content.is_empty() {
+                    if let Some(extension) = diff.extension {
+                        diff_out_file.add_extension(extension);
+                    }
+                    std::fs::write(&diff_out_file, &diff.content)?;
+                    println!("Changed '{path}' ({}ms)", start.elapsed().as_millis());
                 }
-                std::fs::write(diff_out_file, diff.content)?;
-                println!("Changed '{path}' ({}ms)", start.elapsed().as_millis());
             }
 
             Ok(())
