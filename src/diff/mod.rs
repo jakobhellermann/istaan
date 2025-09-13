@@ -119,7 +119,7 @@ fn try_diff_text(cx: &Context, data: OldNew<&[u8]>) -> Option<String> {
 
 fn diff_text(cx: &Context, data: OldNew<&str>) -> String {
     let len = data.map(str::len).max();
-    let threshold = 1024 * 128;
+    let threshold = 1024 * 1024;
     let diff = len < threshold;
 
     if diff {
@@ -206,7 +206,7 @@ fn diff_json(cx: &Context, data: OldNew<&serde_json::Value>) -> Result<String> {
                 _ => None,
             };
             if let Some(val) = val {
-                write!(f, " {val}")?;
+                write!(f, " {}", serde_json::to_string_pretty(val)?)?;
             }
         }
     }

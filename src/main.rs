@@ -147,6 +147,7 @@ fn diff(manifest_files: OldNew<&ManifestFiles>, diff_out_dir: &Path) -> Result<(
                 ClassId::SpriteAtlas,
                 ClassId::SpriteRenderer,
                 ClassId::CircleCollider2D,
+                ClassId::HingeJoint2D,
             ]),
         },
     };
