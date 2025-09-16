@@ -158,7 +158,7 @@ fn diff(manifest_files: OldNew<&ManifestFiles>, diff_out_dir: &Path) -> Result<(
         file_filter: "".into(),
         text_diff_context_size: 6,
 
-        json_ignore_regex: Some(Regex::new("m_PreloadTable|preloadIndex").unwrap()),
+        json_ignore_regex: Some(Regex::new("m_PreloadTable|preloadIndex|m_glyphInfoList").unwrap()),
         json_ignore_new_default: true,
         json_sort: false,
 
@@ -171,6 +171,7 @@ fn diff(manifest_files: OldNew<&ManifestFiles>, diff_out_dir: &Path) -> Result<(
                 ClassId::Sprite,
                 ClassId::SpriteAtlas,
                 ClassId::SpriteRenderer,
+                ClassId::AudioSource,
                 ClassId::CircleCollider2D,
                 ClassId::HingeJoint2D,
             ]),
