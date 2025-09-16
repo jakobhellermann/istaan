@@ -1,7 +1,7 @@
 pub mod cs;
 pub mod unity;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anstream::eprintln;
 use anyhow::{Context as _, Result};
@@ -34,16 +34,22 @@ pub struct Context<'a> {
 pub struct DiffResult {
     pub content: String,
     pub extension: Option<&'static str>,
+    pub children: Vec<(PathBuf, DiffResult)>,
 }
 impl DiffResult {
-    pub fn new(content: String, extension: &'static str) -> Self {
+    pub fn new_with_ext(content: String, extension: &'static str) -> Self {
         DiffResult {
             content,
             extension: Some(extension),
+            children: Vec::new(),
         }
     }
     pub fn diff_ext(content: String) -> Self {
-        DiffResult::new(content, "diff")
+        DiffResult::new_with_ext(content, "diff")
+    }
+    pub fn with_children(mut self, children: Vec<(PathBuf, DiffResult)>) -> Self {
+        self.children = children;
+        self
     }
 }
 impl From<String> for DiffResult {
@@ -51,6 +57,7 @@ impl From<String> for DiffResult {
         DiffResult {
             content,
             extension: None,
+            children: Vec::new(),
         }
     }
 }
@@ -68,7 +75,7 @@ pub fn diff(cx: &Context, path: &Path, data: OldNew<&[u8]>) -> Result<DiffResult
 
     if extension == Some("dll") && cx.cs_decompile_assembly {
         let diff = cs::diff_assembly(cx, data)?;
-        return Ok(DiffResult::diff_ext(diff));
+        return Ok(diff);
     }
 
     if extension == Some("json") {
@@ -104,6 +111,7 @@ pub fn diff(cx: &Context, path: &Path, data: OldNew<&[u8]>) -> Result<DiffResult
     Ok(DiffResult {
         content: "binary file differs".into(),
         extension: None,
+        children: Vec::new(),
     })
 }
 

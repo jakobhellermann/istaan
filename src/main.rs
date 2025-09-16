@@ -154,8 +154,8 @@ fn diff(manifest_files: OldNew<&ManifestFiles>, diff_out_dir: &Path) -> Result<(
 
     let cx = Context {
         // file_filter: "dataassets".into(),
+        // file_filter: ".dll".into(),
         file_filter: "".into(),
-
         text_diff_context_size: 6,
 
         json_ignore_regex: Some(Regex::new("m_PreloadTable").unwrap()),
@@ -211,18 +211,32 @@ fn diff(manifest_files: OldNew<&ManifestFiles>, diff_out_dir: &Path) -> Result<(
             if manifest_file.map(|file| &file.sha).changed() {
                 let start = Instant::now();
 
-                let mut diff_out_file = diff_out_dir.join(path);
+                let diff_out_file = diff_out_dir.join(path);
                 std::fs::create_dir_all(diff_out_file.parent().unwrap())?;
 
                 let data = manifest_files.try_map(|f| std::fs::read(f.path.join(path)))?;
                 let diff = diff::diff(&cx, Path::new(path), data.as_deref())?;
 
                 if !diff.content.is_empty() {
+                    let mut out_file = diff_out_file.clone();
                     if let Some(extension) = diff.extension {
-                        diff_out_file.add_extension(extension);
+                        out_file.add_extension(extension);
                     }
-                    std::fs::write(&diff_out_file, &diff.content)?;
+                    std::fs::write(&out_file, &diff.content)?;
                     println!("Changed '{path}' ({}ms)", start.elapsed().as_millis());
+                }
+                for (child_path, child) in &diff.children {
+                    ensure!(
+                        diff.extension.is_some(),
+                        "Internal error: Can't have diff with children and no extension"
+                    );
+                    let mut out_file = diff_out_file.join(child_path);
+                    if let Some(extension) = child.extension {
+                        out_file.add_extension(extension);
+                    }
+                    std::fs::create_dir_all(out_file.parent().unwrap())?;
+                    std::fs::write(&out_file, &child.content)
+                        .with_context(|| format!("Failed to save diff {}", out_file.display()))?;
                 }
             }
 

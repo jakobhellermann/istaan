@@ -3,13 +3,13 @@ use std::fmt::Write as _;
 use std::io::Write as _;
 use std::process::Command;
 
-use crate::diff::Context;
+use crate::diff::{Context, DiffResult};
 use crate::old_new::OldNew;
 use anyhow::{Context as _, Result, ensure};
 use tempfile::{NamedTempFile, TempDir};
 use walkdir::WalkDir;
 
-pub fn diff_assembly(cx: &Context, data: OldNew<&[u8]>) -> Result<String> {
+pub fn diff_assembly(cx: &Context, data: OldNew<&[u8]>) -> Result<DiffResult> {
     let decomp = data.try_map(|data| -> Result<_> {
         let mut file = NamedTempFile::new()?;
         file.write_all(data)?;
@@ -26,7 +26,7 @@ pub fn diff_assembly(cx: &Context, data: OldNew<&[u8]>) -> Result<String> {
 
         let mut all_files = BTreeSet::default();
 
-        for item in WalkDir::new(dir.path()) {
+        for item in WalkDir::new(&dir) {
             let item = item?;
             if item.file_type().is_dir() {
                 continue;
@@ -38,7 +38,7 @@ pub fn diff_assembly(cx: &Context, data: OldNew<&[u8]>) -> Result<String> {
             {
                 continue;
             }
-            all_files.insert(item.path().strip_prefix(dir.path()).unwrap().to_owned());
+            all_files.insert(item.path().strip_prefix(&dir).unwrap().to_owned());
         }
 
         Ok((dir, all_files))
@@ -53,14 +53,17 @@ pub fn diff_assembly(cx: &Context, data: OldNew<&[u8]>) -> Result<String> {
     for added in &changes.removed {
         writeln!(&mut text, "Removed {}", added.display())?;
     }
-    for file in &changes.same {
-        let source = decomp.try_map(|(dir, _)| std::fs::read_to_string(dir.path().join(file)))?;
+
+    let mut children = Vec::new();
+
+    for file in changes.same {
+        let source = decomp.try_map(|(dir, _)| std::fs::read_to_string(dir.as_ref().join(file)))?;
         let diff = super::diff_text(cx, source.as_deref());
         if !diff.is_empty() {
-            writeln!(&mut text, "--- {} ---", file.display())?;
-            writeln!(&mut text, "{}", diff)?;
+            writeln!(&mut text, "Changed: {}", file.display())?;
+            children.push((file.clone(), DiffResult::new_with_ext(diff, "diff")));
         }
     }
 
-    Ok(text)
+    Ok(DiffResult::diff_ext(text).with_children(children))
 }
