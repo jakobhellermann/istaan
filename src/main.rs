@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use anyhow::{Context as _, Result, anyhow};
+use anyhow::{Context as _, Result, anyhow, bail, ensure};
 use clap::Parser;
 use rabex::objects::ClassId;
 use rabex_env::Environment;
@@ -72,8 +72,8 @@ enum Command {
     Diff {
         #[clap(long, short, default_value = "diff")]
         out_dir: PathBuf,
-        manifest_old: String,
-        manifest_new: String,
+        manifest_old: Option<String>,
+        manifest_new: Option<String>,
     },
 }
 
@@ -96,7 +96,30 @@ fn main() -> Result<()> {
             manifest_old,
             manifest_new,
         }) => {
-            let manifest = OldNew::new(manifest_old, manifest_new);
+            let manifest = match (manifest_old, manifest_new) {
+                (Some(old), Some(new)) => OldNew::new(old, new),
+                (Some(new), None) => {
+                    let new_index = app
+                        .manifests
+                        .iter()
+                        .position(|m| m.manifest.id == new)
+                        .context(format!("manifest {} does not exist", new))?;
+                    ensure!(
+                        new_index >= 1,
+                        "Cannot compute diff for first manifest version"
+                    );
+                    let old_index = new_index - 1;
+                    let old = app.manifests[old_index].manifest.id.clone();
+                    OldNew::new(old, new)
+                }
+                (None, None) => match app.manifests.as_slice() {
+                    [] => bail!("No downloaded manifests found"),
+                    [_] => bail!("Only one downloaded manifest found"),
+                    [.., old, new] => OldNew::new(old, new).map(|m| m.manifest.id.clone()),
+                },
+                (None, Some(_)) => unreachable!(),
+            };
+
             let files = manifest.try_map(|id| {
                 app.manifests
                     .iter()
@@ -108,6 +131,8 @@ fn main() -> Result<()> {
                 files.old.manifest.date.date(),
                 files.new.manifest.date.date()
             ));
+
+            println!("Diffing {} -> {}", files.old.manifest, files.new.manifest);
 
             let start = Instant::now();
             diff(files, &out_dir).context("Failed to generate diff")?;

@@ -1,12 +1,18 @@
 use anyhow::{Context, Result, ensure};
 use jiff::civil::DateTime;
 use std::collections::BTreeMap;
+use std::fmt::Display;
 
 #[derive(Debug)]
 pub struct Manifest {
     pub id: String,
     pub date: DateTime,
     pub files: BTreeMap<String, ManifestFile>,
+}
+impl Display for Manifest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} ({})", self.id, self.date.date())
+    }
 }
 
 #[derive(Debug)]
