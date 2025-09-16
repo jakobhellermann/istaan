@@ -306,6 +306,7 @@ dependencies = [
  "rabex-env",
  "rayon",
  "regex",
+ "rustc-hash",
  "serde",
  "serde_derive",
  "serde_json",

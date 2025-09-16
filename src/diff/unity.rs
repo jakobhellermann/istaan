@@ -1,5 +1,5 @@
-use std::collections::HashSet;
-use std::fmt::Write;
+use std::collections::{BTreeMap, HashSet};
+use std::fmt::{Display, Write};
 use std::io::Cursor;
 use std::path::Path;
 
@@ -7,13 +7,16 @@ use anstream::eprintln;
 use anstyle::{Color, Style};
 use anyhow::{Context as _, Result};
 use rabex::files::bundlefile::{BundleFileReader, ExtractionConfig};
+use rabex::objects::pptr::PathId;
 use rabex::objects::{ClassId, TypedPPtr};
 use rabex::serde_typetree;
 use rabex::typetree::TypeTreeProvider;
+use rabex_env::game_files::GameFiles;
 use rabex_env::handle::{ObjectRefHandle, SerializedFileHandle};
 use rabex_env::rabex::files::SerializedFile;
 use rabex_env::resolver::BasedirEnvResolver;
-use rabex_env::unity::types::GameObject;
+use rabex_env::unity::types::{GameObject, MonoBehaviour, Transform};
+use rustc_hash::{FxHashMap, FxHashSet};
 use serde::Deserialize;
 
 use crate::old_new::OldNew;
@@ -30,6 +33,290 @@ impl Filter {
 }
 
 pub fn diff_serializedfile(cx: &Context, path: &Path, data: OldNew<&[u8]>) -> Result<String> {
+    diff_serializedfile_smart(cx, path, data)
+}
+
+fn diff_serializedfile_smart(cx: &Context, _: &Path, data: OldNew<&[u8]>) -> Result<String> {
+    let env = cx
+        .unity_game
+        .as_ref()
+        .context("cannot diff bundlefile outside unity game")?;
+
+    let old_reader = &mut Cursor::new(data.old);
+    let new_reader = &mut Cursor::new(data.new);
+    let mut old = SerializedFile::from_reader(old_reader)?;
+    let mut new = SerializedFile::from_reader(new_reader)?;
+    old.m_UnityVersion.get_or_insert(env.old.unity_version()?);
+    new.m_UnityVersion.get_or_insert(env.new.unity_version()?);
+
+    let old = SerializedFileHandle::new(&env.old, &old, data.old);
+    let new = SerializedFileHandle::new(&env.new, &new, data.new);
+
+    let file = OldNew::new(old, new);
+
+    let mut text = super::diff_text(
+        cx,
+        OldNew::new(
+            &format!("{:#?}", format::SerializedFile::from(file.old.file)),
+            &format!("{:#?}", format::SerializedFile::from(file.new.file)),
+        ),
+    );
+    if !text.is_empty() {
+        text.push('\n');
+    }
+
+    /*if path.extension().is_some_and(|x| x == "sharedAssets") {
+        return Ok(text);
+    }*/
+
+    let transforms = file.as_ref().try_map(|file| {
+        file.transforms()?
+            .map(|transform| {
+                let path_id = transform.path_id();
+                let transform = transform.read()?;
+                let go = file.deref(transform.m_GameObject)?.read()?;
+                Ok((path_id, (transform, go)))
+            })
+            .collect::<Result<FxHashMap<PathId, _>>>()
+    })?;
+
+    let mut cx = SceneMatcher {
+        cx,
+        transforms: &transforms,
+        file,
+        current_path: Vec::new(),
+        current_old: PathId::default(),
+        old_seen: HashSet::default(),
+        out: &mut text,
+    };
+    cx.visit_roots()?;
+
+    for (path_id, (t, go)) in &cx.transforms.old {
+        if !cx.old_seen.contains(path_id) {
+            let mut components: Vec<_> = std::iter::successors(Some((t, go)), |(t, _)| {
+                let parent = cx.transforms.old.get(&t.m_Father.m_PathID)?;
+                Some((&parent.0, &parent.1))
+            })
+            .map(|(_, go)| go.m_Name.as_str())
+            .collect();
+            components.reverse();
+            let path = components.join("/");
+
+            writeln!(&mut cx.out, "--- Removed object '{}' ---", path)?;
+        }
+    }
+
+    Ok(text)
+}
+
+struct SceneMatcher<'a, P> {
+    cx: &'a Context<'a>,
+    transforms: &'a OldNew<FxHashMap<PathId, (Transform, GameObject)>>,
+    file: OldNew<SerializedFileHandle<'a, GameFiles, P>>,
+
+    current_old: PathId,
+    current_path: Vec<String>,
+
+    out: &'a mut String,
+
+    old_seen: FxHashSet<PathId>,
+}
+impl<'a, P: TypeTreeProvider> SceneMatcher<'a, P> {
+    fn added_object(&mut self, path: String) -> Result<()> {
+        writeln!(self.out, "--- Added Object '{}' ---", path)?;
+        Ok(())
+    }
+    fn compare(&mut self, path: String, data: OldNew<(&Transform, &GameObject)>) -> Result<()> {
+        let components =
+            data.as_ref()
+                .map(|x| &x.1)
+                .try_map_zip(&self.file, |go, file| -> Result<_> {
+                    let mut components = BTreeMap::new();
+                    for component in go.components(file.file, &file.env.tpk) {
+                        let component = ObjectRefHandle::new(component?, file.reborrow());
+
+                        let component_key = match component.class_id() {
+                            ClassId::MonoBehaviour => {
+                                match component.cast::<MonoBehaviour>().mono_script()? {
+                                    Some(script) => {
+                                        ComponentKey::Script(script.full_name().into_owned())
+                                    }
+                                    None => ComponentKey::ClassId(ClassId::MonoBehaviour),
+                                }
+                            }
+                            class_id => ComponentKey::ClassId(class_id),
+                        };
+
+                        components.insert(component_key, component);
+                    }
+                    Ok(components)
+                })?;
+        let component_changes = components.as_ref().changes(|x| x.keys());
+
+        for new_component in component_changes.added {
+            writeln!(self.out, "--- Added {} @ '{}' ---\n", new_component, path)?;
+        }
+        for removed_component in component_changes.removed {
+            writeln!(
+                self.out,
+                "--- Removed {} @ '{}' ---\n",
+                removed_component, path
+            )?;
+        }
+        for component in component_changes.same {
+            let comp = components.as_ref().map(|x| &x[component]);
+
+            if !self.cx.unity_filter.matches(comp.new) {
+                continue;
+            }
+
+            let data = comp.map(|comp| {
+                let start = comp.object.info.m_Offset as usize;
+                &comp.file.data[start..start + comp.object.info.m_Size as usize]
+            });
+            if data.changed() {
+                let value = data.try_map_zip(&comp, |data, comp| {
+                    serde_typetree::from_reader_endianed::<serde_json::Value>(
+                        &mut Cursor::new(data),
+                        &comp.object.tt,
+                        comp.file.file.m_Header.m_Endianess,
+                    )
+                })?;
+
+                let diff = super::diff_json(self.cx, value.as_ref())?;
+                if !diff.is_empty() {
+                    writeln!(self.out, "--- Changed {} @ '{}' ---", component, path)?;
+                    writeln!(self.out, "{}", diff)?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn visit(&mut self, transform: &Transform, go: &GameObject) -> Result<()> {
+        assert!(!go.m_Name.is_empty());
+        self.current_path.push(go.m_Name.clone());
+
+        let current_old = self.current_old;
+        let old = &self.transforms.old[&current_old];
+
+        self.old_seen.insert(current_old);
+
+        self.compare(
+            self.current_path.join("/"),
+            OldNew::new((&old.0, &old.1), (transform, go)),
+        )?;
+
+        let mut current_siblings_seen = FxHashMap::<String, usize>::default();
+        for &child in &transform.m_Children {
+            let child = self.file.new.deref(child)?;
+            let child = child.read()?;
+            let child_go = self.file.new.deref(child.m_GameObject)?.read()?;
+
+            let sibling_index = {
+                let entry = current_siblings_seen
+                    .entry(child_go.m_Name.clone())
+                    .or_default();
+                let index = *entry;
+                *entry += 1;
+                index
+            };
+
+            let old_child = old
+                .0
+                .m_Children
+                .iter()
+                .filter_map(|&old_child| {
+                    assert!(old_child.is_local());
+                    let path_id = old_child.m_PathID;
+                    let old_child = &self.transforms.old[&path_id];
+                    (old_child.1.m_Name == child_go.m_Name).then_some((
+                        path_id,
+                        &old_child.0,
+                        &old_child.1,
+                    ))
+                }).nth(sibling_index);
+
+            let old_child = match old_child {
+                Some(val) => val,
+                None => {
+                    let mut added_path = self.current_path.join("/");
+                    added_path.push('/');
+                    added_path.push_str(&child_go.m_Name);
+                    self.added_object(added_path)?;
+                    continue;
+                }
+            };
+
+            self.current_old = old_child.0;
+            self.visit(&child, &child_go)?;
+        }
+
+        self.current_old = current_old;
+        self.current_path.pop();
+
+        Ok(())
+    }
+
+    fn visit_roots(&mut self) -> Result<()> {
+        let mut roots_seen = FxHashMap::<&str, usize>::default();
+        for (&root, (_, root_go)) in self
+            .transforms
+            .new
+            .iter()
+            .filter(|(_, (t, _))| t.m_Father.is_null())
+        {
+            let root_seen_count = {
+                let entry = roots_seen.entry(&root_go.m_Name).or_default();
+                let seen = *entry;
+                *entry += 1;
+                seen
+            };
+
+            let matching_old = self
+                .transforms
+                .old
+                .iter()
+                .filter(|(_, (t, go))| t.m_Father.is_null() && go.m_Name == root_go.m_Name).nth(root_seen_count);
+
+            let matching_old = match matching_old {
+                Some(val) => val,
+                None => {
+                    writeln!(
+                        &mut self.out,
+                        "--- Removed Object '{}'@{}\n",
+                        root_go.m_Name, root_seen_count
+                    )?;
+                    continue;
+                }
+            };
+            self.current_old = *matching_old.0;
+
+            let root = &self.transforms.new[&root];
+            self.visit(&root.0, &root.1)?;
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum ComponentKey {
+    Script(String),
+    ClassId(ClassId),
+}
+impl Display for ComponentKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ComponentKey::Script(name) => f.write_str(name),
+            ComponentKey::ClassId(class_id) => std::fmt::Debug::fmt(class_id, f),
+        }
+    }
+}
+
+#[allow(dead_code)]
+fn diff_serializedfile_old(cx: &Context, path: &Path, data: OldNew<&[u8]>) -> Result<String> {
     let env = cx
         .unity_game
         .as_ref()
@@ -176,21 +463,22 @@ pub fn diff_serializedfile(cx: &Context, path: &Path, data: OldNew<&[u8]>) -> Re
                 }
 
                 Ok(())
-            })() {
-                writeln!(
-                    &mut text,
-                    "--- change object {:?} at path id {path_id} ---",
-                    object.new.class_id()
-                )?;
+            })()
+        {
+            writeln!(
+                &mut text,
+                "--- change object {:?} at path id {path_id} ---",
+                object.new.class_id()
+            )?;
 
-                let style = Style::new().fg_color(Some(Color::Ansi(anstyle::AnsiColor::Red)));
-                eprintln!(
-                    "{style}Skipping {:?} object in {} (Path ID {}): {e:?}{style:#}",
-                    object.new.class_id(),
-                    path.display(),
-                    path_id,
-                );
-            }
+            let style = Style::new().fg_color(Some(Color::Ansi(anstyle::AnsiColor::Red)));
+            eprintln!(
+                "{style}Skipping {:?} object in {} (Path ID {}): {e:?}{style:#}",
+                object.new.class_id(),
+                path.display(),
+                path_id,
+            );
+        }
     }
 
     Ok(text)

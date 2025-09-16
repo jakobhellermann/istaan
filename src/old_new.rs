@@ -2,7 +2,7 @@
 use std::collections::BTreeSet;
 use std::ops::Deref;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy)]
 pub struct OldNew<T> {
     pub old: T,
     pub new: T,

@@ -20,6 +20,7 @@ serde = "1.0.219"
 jiff = { version = "0.2.15", default-features = false, features = ["std"] }
 tempfile = { version = "3.22.0", default-features = false }
 walkdir = "2.5.0"
+rustc-hash = "2.1.1"
 
 [patch."https://github.com/jakobhellermann/rabex-env"]
 rabex-env = { path = "/home/jakob/dev/unity/rabex-env" }
