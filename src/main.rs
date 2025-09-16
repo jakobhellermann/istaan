@@ -158,7 +158,7 @@ fn diff(manifest_files: OldNew<&ManifestFiles>, diff_out_dir: &Path) -> Result<(
         file_filter: "".into(),
         text_diff_context_size: 6,
 
-        json_ignore_regex: Some(Regex::new("m_PreloadTable").unwrap()),
+        json_ignore_regex: Some(Regex::new("m_PreloadTable|preloadIndex").unwrap()),
         json_ignore_new_default: true,
         json_sort: false,
 
