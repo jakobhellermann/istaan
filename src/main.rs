@@ -212,7 +212,6 @@ fn diff(manifest_files: OldNew<&ManifestFiles>, diff_out_dir: &Path) -> Result<(
                 let start = Instant::now();
 
                 let diff_out_file = diff_out_dir.join(path);
-                std::fs::create_dir_all(diff_out_file.parent().unwrap())?;
 
                 let data = manifest_files.try_map(|f| std::fs::read(f.path.join(path)))?;
                 let diff = diff::diff(&cx, Path::new(path), data.as_deref())?;
@@ -222,6 +221,7 @@ fn diff(manifest_files: OldNew<&ManifestFiles>, diff_out_dir: &Path) -> Result<(
                     if let Some(extension) = diff.extension {
                         out_file.add_extension(extension);
                     }
+                    std::fs::create_dir_all(diff_out_file.parent().unwrap())?;
                     std::fs::write(&out_file, &diff.content)?;
                     println!("Changed '{path}' ({}ms)", start.elapsed().as_millis());
                 }
