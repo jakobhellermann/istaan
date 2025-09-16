@@ -46,6 +46,20 @@ impl<T> OldNew<T> {
             new: f(self.new, &other.new)?,
         })
     }
+    pub fn try_map_parallel<U: Send, E: Send>(
+        self,
+        f: impl Fn(T) -> Result<U, E> + Send + Sync,
+    ) -> Result<OldNew<U>, E>
+    where
+        T: Send,
+    {
+        let res = rayon::join(|| f(self.old), || f(self.new));
+        Ok(OldNew {
+            old: res.0?,
+            new: res.1?,
+        })
+    }
+
     pub fn consume<R>(self, f: impl FnOnce(Self) -> R) -> R {
         f(self)
     }

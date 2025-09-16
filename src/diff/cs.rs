@@ -10,7 +10,7 @@ use tempfile::{NamedTempFile, TempDir};
 use walkdir::WalkDir;
 
 pub fn diff_assembly(cx: &Context, data: OldNew<&[u8]>) -> Result<DiffResult> {
-    let decomp = data.try_map(|data| -> Result<_> {
+    let decomp = data.try_map_parallel(|data| -> Result<_> {
         let mut file = NamedTempFile::new()?;
         file.write_all(data)?;
 
