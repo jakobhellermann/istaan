@@ -1,4 +1,4 @@
-#![feature(str_split_whitespace_remainder, path_add_extension)]
+#![feature(str_split_whitespace_remainder)]
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
