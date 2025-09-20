@@ -154,12 +154,12 @@ impl<'a, P: TypeTreeProvider> SceneMatcher<'a, P> {
         let component_changes = components.as_ref().changes(|x| x.keys());
 
         for new_component in component_changes.added {
-            writeln!(self.out, "--- Added {} @ '{}' ---\n", new_component, path)?;
+            writeln!(self.out, "--- Added {} @ '{}' ---", new_component, path)?;
         }
         for removed_component in component_changes.removed {
             writeln!(
                 self.out,
-                "--- Removed {} @ '{}' ---\n",
+                "--- Removed {} @ '{}' ---",
                 removed_component, path
             )?;
         }
@@ -239,7 +239,8 @@ impl<'a, P: TypeTreeProvider> SceneMatcher<'a, P> {
                         &old_child.0,
                         &old_child.1,
                     ))
-                }).nth(sibling_index);
+                })
+                .nth(sibling_index);
 
             let old_child = match old_child {
                 Some(val) => val,
@@ -281,7 +282,8 @@ impl<'a, P: TypeTreeProvider> SceneMatcher<'a, P> {
                 .transforms
                 .old
                 .iter()
-                .filter(|(_, (t, go))| t.m_Father.is_null() && go.m_Name == root_go.m_Name).nth(root_seen_count);
+                .filter(|(_, (t, go))| t.m_Father.is_null() && go.m_Name == root_go.m_Name)
+                .nth(root_seen_count);
 
             let matching_old = match matching_old {
                 Some(val) => val,
