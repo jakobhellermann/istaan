@@ -126,6 +126,10 @@ fn try_diff_text(cx: &Context, data: OldNew<&[u8]>) -> Option<String> {
 }
 
 fn diff_text(cx: &Context, data: OldNew<&str>) -> String {
+    diff_text_context(data, cx.text_diff_context_size)
+}
+
+fn diff_text_context(data: OldNew<&str>, context_len: usize) -> String {
     let len = data.map(str::len).max();
     let threshold = 1024 * 1024;
     let diff = len < threshold;
@@ -134,7 +138,7 @@ fn diff_text(cx: &Context, data: OldNew<&str>) -> String {
         // let context_len = usize::MAX;
 
         let patch = DiffOptions::new()
-            .set_context_len(cx.text_diff_context_size)
+            .set_context_len(context_len)
             .create_patch(data.old, data.new);
         let text = PatchFormatter::new()
             .missing_newline_message(false)

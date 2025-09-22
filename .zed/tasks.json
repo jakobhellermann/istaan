@@ -8,14 +8,7 @@
   {
     "label": "Run diff (Release)",
     "command": "cargo",
-    "args": [
-      "run",
-      "-r",
-      "--",
-      "diff",
-      "8384590172287463475",
-      "6701825740120558137"
-    ],
+    "args": ["run", "-r", "--", "diff"],
     "reveal": "no_focus"
   }
 ]

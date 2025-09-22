@@ -6,6 +6,7 @@ use std::path::Path;
 use anstream::eprintln;
 use anstyle::{Color, Style};
 use anyhow::{Context as _, Result};
+use indexmap::IndexMap;
 use rabex::files::bundlefile::{BundleFileReader, ExtractionConfig};
 use rabex::objects::pptr::{FileId, PathId};
 use rabex::objects::{ClassId, PPtr, TypedPPtr};
@@ -34,6 +35,38 @@ impl Filter {
 
 pub fn diff_serializedfile(cx: &Context, path: &Path, data: OldNew<&[u8]>) -> Result<String> {
     diff_serializedfile_smart(cx, path, data)
+}
+
+fn write_object_hierarchy<W: std::fmt::Write, R: BasedirEnvResolver, P: TypeTreeProvider>(
+    w: &mut W,
+    root: &Transform,
+    go: &GameObject,
+    file: &SerializedFileHandle<R, P>,
+    indent: usize,
+) -> Result<()> {
+    writeln!(w, "{}{}", "  ".repeat(indent), go.m_Name)?;
+
+    for &child in root.m_Children.iter() {
+        let child = file.deref(child)?;
+        match child.class_id() {
+            ClassId::Transform | ClassId::RectTransform => {
+                let child = child.read()?;
+                let go = file.deref_read(child.m_GameObject).context("b")?;
+                write_object_hierarchy(w, &child, &go, file, indent + 1).context(go.m_Name)?;
+            }
+            // why tf
+            ClassId::GameObject => {
+                let go = child.cast::<GameObject>().read()?;
+                let transform = go
+                    .transform(file.file, &file.env.tpk)?
+                    .unwrap()
+                    .read(&mut file.reader())?;
+                write_object_hierarchy(w, &transform, &go, file, indent + 1).context(go.m_Name)?;
+            }
+            other => unreachable!("{:?}", other),
+        }
+    }
+    Ok(())
 }
 
 fn diff_serializedfile_smart(cx: &Context, _: &Path, data: OldNew<&[u8]>) -> Result<String> {
@@ -77,8 +110,18 @@ fn diff_serializedfile_smart(cx: &Context, _: &Path, data: OldNew<&[u8]>) -> Res
                 let go = file.deref(transform.m_GameObject)?.read()?;
                 Ok((path_id, (transform, go)))
             })
-            .collect::<Result<FxHashMap<PathId, _>>>()
+            .collect::<Result<IndexMap<PathId, _>>>()
     })?;
+
+    let hierarchy = transforms.as_ref().try_map(|transforms| -> Result<_> {
+        let mut out = String::new();
+        for (_, (transform, go)) in transforms.iter().filter(|x| x.1.0.m_Father.is_null()) {
+            write_object_hierarchy(&mut out, transform, go, &file.new, 0)
+                .with_context(|| go.m_Name.clone())?;
+        }
+        Ok(out)
+    })?;
+    text.push_str(&super::diff_text_context(hierarchy.as_deref(), usize::MAX));
 
     let mut cx = SceneMatcher {
         cx,
@@ -111,7 +154,7 @@ fn diff_serializedfile_smart(cx: &Context, _: &Path, data: OldNew<&[u8]>) -> Res
 
 struct SceneMatcher<'a, P> {
     cx: &'a Context<'a>,
-    transforms: &'a OldNew<FxHashMap<PathId, (Transform, GameObject)>>,
+    transforms: &'a OldNew<IndexMap<PathId, (Transform, GameObject)>>,
     file: OldNew<SerializedFileHandle<'a, GameFiles, P>>,
 
     current_old: PathId,
