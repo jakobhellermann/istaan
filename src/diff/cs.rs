@@ -45,16 +45,19 @@ pub fn diff_assembly(cx: &Context, data: OldNew<&[u8]>) -> Result<DiffResult> {
     })?;
     let decomp = decomp.as_ref();
 
+    let mut children = Vec::new();
+
     let changes = decomp.changes(|(_, all_files)| all_files.iter());
     let mut text = String::new();
-    for added in &changes.added {
+    for added in changes.added {
         writeln!(&mut text, "Added {}", added.display())?;
+        let dir = &decomp.new.0;
+        let source = std::fs::read_to_string(dir.as_ref().join(added))?;
+        children.push((added.clone(), DiffResult::from(source)));
     }
-    for added in &changes.removed {
+    for added in changes.removed {
         writeln!(&mut text, "Removed {}", added.display())?;
     }
-
-    let mut children = Vec::new();
 
     for file in changes.same {
         let source = decomp.try_map(|(dir, _)| std::fs::read_to_string(dir.as_ref().join(file)))?;
