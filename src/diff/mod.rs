@@ -86,7 +86,9 @@ pub fn diff(cx: &Context, path: &Path, data: OldNew<&[u8]>) -> Result<DiffResult
         )?));
     }
 
-    if extension == Some("assets") || file_name == "globalgamemanagers" {
+    if extension == Some("assets")
+        || ["globalgamemanagers", "unity_default_resources"].contains(&file_name)
+    {
         return unity::diff_serializedfile(cx, path, data)
             .map(DiffResult::diff_ext)
             .context("failed to diff unity serializedfile");
