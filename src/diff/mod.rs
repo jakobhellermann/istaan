@@ -239,6 +239,6 @@ fn is_json_default(new_value: &serde_json::Value) -> bool {
         serde_json::Value::Number(number) => number.as_u64() == Some(0),
         serde_json::Value::String(str) => str.is_empty(),
         serde_json::Value::Array(arr) => arr.is_empty(),
-        serde_json::Value::Object(map) => map.is_empty(),
+        serde_json::Value::Object(map) => map.is_empty() || map.values().all(is_json_default),
     }
 }
