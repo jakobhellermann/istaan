@@ -88,6 +88,9 @@ pub fn diff(cx: &Context, path: &Path, data: OldNew<&[u8]>) -> Result<DiffResult
 
     if extension == Some("assets")
         || ["globalgamemanagers", "unity_default_resources"].contains(&file_name)
+        || file_name
+            .strip_prefix("level")
+            .is_some_and(|i| i.parse::<usize>().is_ok())
     {
         return unity::diff_serializedfile(cx, path, data)
             .map(DiffResult::diff_ext)
