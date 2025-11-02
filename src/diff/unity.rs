@@ -63,7 +63,10 @@ fn write_object_hierarchy<W: std::fmt::Write, R: EnvResolver, P: TypeTreeProvide
                     .read(&mut file.reader())?;
                 write_object_hierarchy(w, &transform, &go, file, indent + 1).context(go.m_Name)?;
             }
-            ClassId::MeshRenderer | ClassId::SpriteRenderer => {
+            ClassId::MeshRenderer
+            | ClassId::SpriteRenderer
+            | ClassId::Canvas
+            | ClassId::MeshFilter => {
                 // huh?
             }
             other => unreachable!("{:?}", other),
