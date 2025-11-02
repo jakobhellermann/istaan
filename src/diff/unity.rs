@@ -15,7 +15,7 @@ use rabex::typetree::TypeTreeProvider;
 use rabex_env::game_files::GameFiles;
 use rabex_env::handle::{ObjectRefHandle, SerializedFileHandle};
 use rabex_env::rabex::files::SerializedFile;
-use rabex_env::resolver::BasedirEnvResolver;
+use rabex_env::resolver::EnvResolver;
 use rabex_env::unity::types::{GameObject, MonoBehaviour, Transform};
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::Deserialize;
@@ -37,7 +37,7 @@ pub fn diff_serializedfile(cx: &Context, path: &Path, data: OldNew<&[u8]>) -> Re
     diff_serializedfile_smart(cx, path, data)
 }
 
-fn write_object_hierarchy<W: std::fmt::Write, R: BasedirEnvResolver, P: TypeTreeProvider>(
+fn write_object_hierarchy<W: std::fmt::Write, R: EnvResolver, P: TypeTreeProvider>(
     w: &mut W,
     root: &Transform,
     go: &GameObject,
@@ -82,8 +82,10 @@ fn diff_serializedfile_smart(cx: &Context, _: &Path, data: OldNew<&[u8]>) -> Res
     let new_reader = &mut Cursor::new(data.new);
     let mut old = SerializedFile::from_reader(old_reader)?;
     let mut new = SerializedFile::from_reader(new_reader)?;
-    old.m_UnityVersion.get_or_insert(env.old.unity_version()?);
-    new.m_UnityVersion.get_or_insert(env.new.unity_version()?);
+    old.m_UnityVersion
+        .get_or_insert(env.old.unity_version()?.clone());
+    new.m_UnityVersion
+        .get_or_insert(env.new.unity_version()?.clone());
 
     let old = SerializedFileHandle::new(&env.old, &old, data.old);
     let new = SerializedFileHandle::new(&env.new, &new, data.new);
@@ -106,7 +108,7 @@ fn diff_serializedfile_smart(cx: &Context, _: &Path, data: OldNew<&[u8]>) -> Res
     }*/
 
     let transforms = file.as_ref().try_map(|file| {
-        file.transforms()?
+        file.transforms()
             .map(|transform| {
                 let path_id = transform.path_id();
                 let transform = transform.read()?;
@@ -221,12 +223,12 @@ impl<'a, P: TypeTreeProvider> SceneMatcher<'a, P> {
                 &comp.file.data[start..start + comp.object.info.m_Size as usize]
             });
             if data.changed() {
-                let mut value = data.try_map_zip(&comp, |data, comp| {
-                    serde_typetree::from_reader_endianed::<serde_json::Value>(
+                let mut value = data.try_map_zip(&comp, |data, comp| -> Result<_> {
+                    Ok(serde_typetree::from_reader_endianed::<serde_json::Value>(
                         &mut Cursor::new(data),
-                        &comp.object.tt,
+                        comp.object.typetree()?,
                         comp.file.file.m_Header.m_Endianess,
-                    )
+                    )?)
                 })?;
 
                 qualify_pptrs(&self.file.old, &mut value.old).context("qualifying pptrs")?;
@@ -377,8 +379,10 @@ fn diff_serializedfile_old(cx: &Context, path: &Path, data: OldNew<&[u8]>) -> Re
     let new_reader = &mut Cursor::new(data.new);
     let mut old = SerializedFile::from_reader(old_reader)?;
     let mut new = SerializedFile::from_reader(new_reader)?;
-    old.m_UnityVersion.get_or_insert(env.old.unity_version()?);
-    new.m_UnityVersion.get_or_insert(env.new.unity_version()?);
+    old.m_UnityVersion
+        .get_or_insert(env.old.unity_version()?.clone());
+    new.m_UnityVersion
+        .get_or_insert(env.new.unity_version()?.clone());
 
     let old = SerializedFileHandle::new(&env.old, &old, data.old);
     let new = SerializedFileHandle::new(&env.new, &new, data.new);
@@ -464,12 +468,12 @@ fn diff_serializedfile_old(cx: &Context, path: &Path, data: OldNew<&[u8]>) -> Re
             && let Err(e) = (|| -> Result<()> {
                 let old_value = serde_typetree::from_reader_endianed::<serde_json::Value>(
                     &mut Cursor::new(data.old),
-                    &object.old.object.tt,
+                    object.old.object.typetree()?,
                     object.old.file.file.m_Header.m_Endianess,
                 )?;
                 let new_value = serde_typetree::from_reader_endianed::<serde_json::Value>(
                     &mut Cursor::new(data.new),
-                    &object.new.object.tt,
+                    object.new.object.typetree()?,
                     object.new.file.file.m_Header.m_Endianess,
                 )?;
 
@@ -547,7 +551,8 @@ pub fn diff_bundlefile(cx: &Context, path: &Path, data: OldNew<&[u8]>) -> Result
         .context("cannot diff bundlefile outside unity game")?;
 
     let bundle = data.try_map_zip(env, |data, env| -> Result<_> {
-        let config = ExtractionConfig::new(None, Some(env.unity_version()?));
+        let config =
+            ExtractionConfig::default().with_fallback_unity_version(env.unity_version()?.clone());
         let bundle = BundleFileReader::from_reader(Cursor::new(data), &config)?;
         Ok(bundle)
     })?;
@@ -615,7 +620,7 @@ pub mod format {
                 m_Header: SerializedFileHeader {
                     m_Version: value.m_Header.m_Version,
                 },
-                m_UnityVersion: value.m_UnityVersion,
+                m_UnityVersion: value.m_UnityVersion.clone(),
                 m_TargetPlatform: value.m_TargetPlatform,
                 m_EnableTypeTree: value.m_EnableTypeTree,
                 m_bigIDEnabled: value.m_bigIDEnabled,
@@ -630,7 +635,7 @@ pub mod format {
     }
 }
 
-fn name<R: BasedirEnvResolver, P: TypeTreeProvider>(
+fn name<R: EnvResolver, P: TypeTreeProvider>(
     object: &ObjectRefHandle<serde_json::Value, R, P>,
     val: &serde_json::Value,
 ) -> Result<String> {
@@ -661,7 +666,7 @@ fn name<R: BasedirEnvResolver, P: TypeTreeProvider>(
     Ok(result)
 }
 
-fn qualify_pptrs<R: BasedirEnvResolver, P: TypeTreeProvider>(
+fn qualify_pptrs<R: EnvResolver, P: TypeTreeProvider>(
     file: &SerializedFileHandle<'_, R, P>,
     value: &mut serde_json::Value,
 ) -> Result<()> {
@@ -711,7 +716,7 @@ fn replace_pptrs(
                 && let Some(file_id) = map.get("m_FileID").and_then(|x| x.as_number()?.as_i64())
                 && let Some(path_id) = map.get("m_PathID").and_then(|x| x.as_number()?.as_i64())
             {
-                let pptr = PPtr::new(file_id as FileId, path_id);
+                let pptr = PPtr::new(FileId::new(file_id as i32), path_id);
                 f(pptr)?
             } else {
                 return map.values_mut().try_for_each(|x| replace_pptrs(x, f));
