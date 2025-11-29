@@ -66,6 +66,7 @@ fn write_object_hierarchy<W: std::fmt::Write, R: EnvResolver, P: TypeTreeProvide
             ClassId::MeshRenderer
             | ClassId::SpriteRenderer
             | ClassId::Canvas
+            | ClassId::CanvasRenderer
             | ClassId::MeshFilter => {
                 // huh?
             }
