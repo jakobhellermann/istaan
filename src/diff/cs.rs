@@ -22,7 +22,15 @@ pub fn diff_assembly(cx: &Context, data: OldNew<&[u8]>) -> Result<DiffResult> {
             .arg(dir.path())
             .output()
             .context("failed to run ilspycmd")?;
-        ensure!(output.status.success(), "failed to run ilspycmd");
+        ensure!(
+            output.status.success(),
+            "ilspycmd {} -p -o {} failed with {}\nstdout:\n{}\nstderr:\n{}",
+            file.path().display(),
+            dir.path().display(),
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
 
         let mut all_files = BTreeSet::default();
 

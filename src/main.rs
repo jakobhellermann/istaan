@@ -21,7 +21,8 @@ mod diff;
 mod old_new;
 
 pub fn find_single_file_of_extension(folder: &Path, extension: &str) -> Result<PathBuf> {
-    let entries = std::fs::read_dir(folder)?;
+    let entries = std::fs::read_dir(folder)
+        .with_context(|| format!("Failed to read directory {}", folder.display()))?;
 
     let mut manifest_files: Vec<PathBuf> = entries
         .filter_map(|entry| entry.ok())
@@ -31,8 +32,11 @@ pub fn find_single_file_of_extension(folder: &Path, extension: &str) -> Result<P
 
     match manifest_files.len() {
         1 => Ok(manifest_files.pop().unwrap()),
-        0 => Err(anyhow!("No .{extension} file found in {:?}", folder)),
-        _ => Err(anyhow!("Multiple .{extension} files found in {:?}", folder)),
+        0 => Err(anyhow!("No .{extension} file found in {}", folder.display())),
+        _ => Err(anyhow!(
+            "Multiple .{extension} files found in {}",
+            folder.display()
+        )),
     }
 }
 
@@ -45,12 +49,20 @@ struct ManifestFiles {
 }
 
 fn load() -> Result<App> {
+    let manifests_root = Path::new("data/manifests");
     let mut manifests = Vec::new();
-    for manifest in std::fs::read_dir("data/manifests")? {
-        let manifest_dir = manifest?.path();
-        let manifest_path = find_single_file_of_extension(&manifest_dir, "txt")?;
-        let manifest = std::fs::read_to_string(manifest_path)?;
-        let manifest = Manifest::parse(&manifest)?;
+    let entries = std::fs::read_dir(manifests_root)
+        .with_context(|| format!("Failed to read manifests directory {}", manifests_root.display()))?;
+    for manifest in entries {
+        let manifest_dir = manifest
+            .with_context(|| format!("Failed to read entry in {}", manifests_root.display()))?
+            .path();
+        let manifest_path = find_single_file_of_extension(&manifest_dir, "txt")
+            .with_context(|| format!("Failed to locate manifest .txt in {}", manifest_dir.display()))?;
+        let manifest_content = std::fs::read_to_string(&manifest_path)
+            .with_context(|| format!("Failed to read manifest file {}", manifest_path.display()))?;
+        let manifest = Manifest::parse(&manifest_content)
+            .with_context(|| format!("Failed to parse manifest {}", manifest_path.display()))?;
         manifests.push(ManifestFiles {
             path: manifest_dir,
             manifest,
