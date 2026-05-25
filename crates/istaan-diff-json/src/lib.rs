@@ -31,12 +31,8 @@ pub fn diff_json(options: &JsonDiffOptions, data: OldNew<&serde_json::Value>) ->
             && let DiffType::RightExtra = diff_type
         {
             match diff_path.resolve(data.new) {
-                Some(new_value) => {
-                    if is_json_default(new_value) {
-                        continue;
-                    }
-                }
-                None => {
+                Some(new_value) if is_json_default(new_value) => continue,
+                Some(_) | None => {
                     /*let style = warn_style();
                     eprintln!(
                         "{style}Couldn't look up path '{}' {style:#}",
