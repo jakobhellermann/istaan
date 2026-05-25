@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-anstream = "0.6"
+anstream = "1.0"
 anstyle = "1.0"
 anyhow = "1.0"
 indexmap = "2.11"
