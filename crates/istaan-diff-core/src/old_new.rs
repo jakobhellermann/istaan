@@ -18,7 +18,11 @@ impl<T> OldNew<T> {
             new: f(self.new),
         }
     }
-    pub fn map_zip<U, O>(self, other: &OldNew<O>, mut f: impl FnMut(T, &O) -> U) -> OldNew<U> {
+    pub fn map_zip<'a, U, O>(
+        self,
+        other: &'a OldNew<O>,
+        mut f: impl FnMut(T, &'a O) -> U,
+    ) -> OldNew<U> {
         OldNew {
             old: f(self.old, &other.old),
             new: f(self.new, &other.new),
@@ -36,10 +40,10 @@ impl<T> OldNew<T> {
             new: f(self.new)?,
         })
     }
-    pub fn try_map_zip<U, O, E>(
+    pub fn try_map_zip<'a, U, O, E>(
         self,
-        other: &OldNew<O>,
-        mut f: impl FnMut(T, &O) -> Result<U, E>,
+        other: &'a OldNew<O>,
+        mut f: impl FnMut(T, &'a O) -> Result<U, E>,
     ) -> Result<OldNew<U>, E> {
         Ok(OldNew {
             old: f(self.old, &other.old)?,

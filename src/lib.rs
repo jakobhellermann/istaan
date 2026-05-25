@@ -27,9 +27,13 @@ pub fn diff(manifest_files: OldNew<&ManifestFiles>, diff_out_dir: &Path) -> Resu
     let _ = std::fs::remove_dir_all(diff_out_dir);
     std::fs::create_dir_all(diff_out_dir)?;
 
-    let tpk = TypeTreeCache::new(TpkTypeTreeBlob::embedded());
+    // Separate TypeTreeCache per side
+    let tpk = OldNew::new(
+        TypeTreeCache::new(TpkTypeTreeBlob::embedded()),
+        TypeTreeCache::new(TpkTypeTreeBlob::embedded()),
+    );
     let unity_game = manifest_files
-        .try_map(|files| Environment::new_in(&files.path, &tpk))
+        .try_map_zip(&tpk, |files, tpk| Environment::new_in(&files.path, tpk))
         .ok();
 
     let cx = Context {
