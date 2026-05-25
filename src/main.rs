@@ -12,13 +12,13 @@ use rabex_env::rabex::typetree::typetree_cache::sync::TypeTreeCache;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use regex::Regex;
 
+use istaan_diff_core::OldNew;
+
 use crate::depotdownloader_manifest::Manifest;
 use crate::diff::Context;
-use crate::old_new::OldNew;
 
 mod depotdownloader_manifest;
 mod diff;
-mod old_new;
 
 pub fn find_single_file_of_extension(folder: &Path, extension: &str) -> Result<PathBuf> {
     let entries = std::fs::read_dir(folder)
@@ -32,7 +32,10 @@ pub fn find_single_file_of_extension(folder: &Path, extension: &str) -> Result<P
 
     match manifest_files.len() {
         1 => Ok(manifest_files.pop().unwrap()),
-        0 => Err(anyhow!("No .{extension} file found in {}", folder.display())),
+        0 => Err(anyhow!(
+            "No .{extension} file found in {}",
+            folder.display()
+        )),
         _ => Err(anyhow!(
             "Multiple .{extension} files found in {}",
             folder.display()
@@ -51,14 +54,23 @@ struct ManifestFiles {
 fn load() -> Result<App> {
     let manifests_root = Path::new("data/manifests");
     let mut manifests = Vec::new();
-    let entries = std::fs::read_dir(manifests_root)
-        .with_context(|| format!("Failed to read manifests directory {}", manifests_root.display()))?;
+    let entries = std::fs::read_dir(manifests_root).with_context(|| {
+        format!(
+            "Failed to read manifests directory {}",
+            manifests_root.display()
+        )
+    })?;
     for manifest in entries {
         let manifest_dir = manifest
             .with_context(|| format!("Failed to read entry in {}", manifests_root.display()))?
             .path();
-        let manifest_path = find_single_file_of_extension(&manifest_dir, "txt")
-            .with_context(|| format!("Failed to locate manifest .txt in {}", manifest_dir.display()))?;
+        let manifest_path =
+            find_single_file_of_extension(&manifest_dir, "txt").with_context(|| {
+                format!(
+                    "Failed to locate manifest .txt in {}",
+                    manifest_dir.display()
+                )
+            })?;
         let manifest_content = std::fs::read_to_string(&manifest_path)
             .with_context(|| format!("Failed to read manifest file {}", manifest_path.display()))?;
         let manifest = Manifest::parse(&manifest_content)
@@ -170,14 +182,16 @@ fn diff(manifest_files: OldNew<&ManifestFiles>, diff_out_dir: &Path) -> Result<(
         file_filter: "".into(),
         text_diff_context_size: 6,
 
-        json_ignore_regex: Some(Regex::new("m_PreloadTable|preloadIndex|m_glyphInfoList").unwrap()),
-        json_ignore_new_default: true,
-        json_sort: false,
+        json: istaan_diff_json::JsonDiffOptions {
+            ignore_regex: Some(Regex::new("m_PreloadTable|preloadIndex|m_glyphInfoList").unwrap()),
+            ignore_new_default: true,
+            sort: false,
+        },
 
         cs_decompile_assembly: true,
 
         unity_game,
-        unity_filter: diff::unity::Filter {
+        unity_filter: istaan_diff_unity::Filter {
             ignore_classes: HashSet::from_iter([
                 ClassId::Texture2D,
                 ClassId::Sprite,

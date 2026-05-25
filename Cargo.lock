@@ -300,20 +300,62 @@ dependencies = [
  "anstyle",
  "anyhow",
  "clap",
- "diffy",
- "indexmap",
+ "istaan-diff-core",
+ "istaan-diff-cs",
+ "istaan-diff-json",
+ "istaan-diff-unity",
  "jiff",
- "json_diff_ng",
  "rabex",
  "rabex-env",
  "rayon",
  "regex",
- "rustc-hash",
- "serde",
- "serde_derive",
  "serde_json",
+]
+
+[[package]]
+name = "istaan-diff-core"
+version = "0.1.0"
+dependencies = [
+ "diffy",
+ "rayon",
+]
+
+[[package]]
+name = "istaan-diff-cs"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "istaan-diff-core",
  "tempfile",
  "walkdir",
+]
+
+[[package]]
+name = "istaan-diff-json"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "istaan-diff-core",
+ "json_diff_ng",
+ "regex",
+ "serde_json",
+]
+
+[[package]]
+name = "istaan-diff-unity"
+version = "0.1.0"
+dependencies = [
+ "anstream",
+ "anstyle",
+ "anyhow",
+ "indexmap",
+ "istaan-diff-core",
+ "istaan-diff-json",
+ "rabex",
+ "rabex-env",
+ "rustc-hash",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

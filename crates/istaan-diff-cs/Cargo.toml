@@ -1,0 +1,10 @@
+[package]
+name = "istaan-diff-cs"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0"
+istaan-diff-core = { path = "../istaan-diff-core", features = ["rayon"] }
+tempfile = { version = "3.22", default-features = false }
+walkdir = "2.5"

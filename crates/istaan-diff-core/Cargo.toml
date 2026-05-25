@@ -1,0 +1,12 @@
+[package]
+name = "istaan-diff-core"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+diffy = "0.4"
+rayon = { version = "1.11", optional = true }
+
+[features]
+default = []
+rayon = ["dep:rayon"]

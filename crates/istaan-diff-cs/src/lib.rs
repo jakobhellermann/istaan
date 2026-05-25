@@ -3,11 +3,14 @@ use std::fmt::Write as _;
 use std::io::Write as _;
 use std::process::Command;
 
-use crate::diff::{Context, DiffResult};
-use crate::old_new::OldNew;
 use anyhow::{Context as _, Result, ensure};
+use istaan_diff_core::{DiffResult, OldNew};
 use tempfile::{NamedTempFile, TempDir};
 use walkdir::WalkDir;
+
+pub struct Context {
+    pub text_diff_context_size: usize,
+}
 
 pub fn diff_assembly(cx: &Context, data: OldNew<&[u8]>) -> Result<DiffResult> {
     let decomp = data.try_map_parallel(|data| -> Result<_> {
@@ -69,7 +72,7 @@ pub fn diff_assembly(cx: &Context, data: OldNew<&[u8]>) -> Result<DiffResult> {
 
     for file in changes.same {
         let source = decomp.try_map(|(dir, _)| std::fs::read_to_string(dir.as_ref().join(file)))?;
-        let diff = super::diff_text(cx, source.as_deref());
+        let diff = istaan_diff_core::diff_text(source.as_deref(), cx.text_diff_context_size);
         if !diff.is_empty() {
             writeln!(&mut text, "Changed: {}", file.display())?;
             children.push((file.clone(), DiffResult::new_with_ext(diff, "diff")));

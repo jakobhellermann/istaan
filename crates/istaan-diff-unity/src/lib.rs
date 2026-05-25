@@ -7,22 +7,32 @@ use anstream::eprintln;
 use anstyle::{Color, Style};
 use anyhow::{Context as _, Result};
 use indexmap::IndexMap;
+use istaan_diff_core::OldNew;
+use istaan_diff_json::JsonDiffOptions;
 use rabex::files::bundlefile::{BundleFileReader, ExtractionConfig};
 use rabex::objects::pptr::{FileId, PathId};
 use rabex::objects::{ClassId, PPtr, TypedPPtr};
 use rabex::serde_typetree;
 use rabex::typetree::TypeTreeProvider;
+use rabex_env::Environment;
 use rabex_env::game_files::GameFiles;
 use rabex_env::handle::{ObjectRefHandle, SerializedFileHandle};
 use rabex_env::rabex::files::SerializedFile;
+use rabex_env::rabex::tpk::TpkTypeTreeBlob;
+use rabex_env::rabex::typetree::typetree_cache::sync::TypeTreeCache;
 use rabex_env::resolver::EnvResolver;
 use rabex_env::unity::types::{GameObject, MonoBehaviour, Transform};
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::Deserialize;
 
-use crate::old_new::OldNew;
+pub struct Context<'a> {
+    pub text_diff_context_size: usize,
 
-use super::Context;
+    pub json: JsonDiffOptions,
+
+    pub unity_game: OldNew<&'a Environment<GameFiles, &'a TypeTreeCache<TpkTypeTreeBlob>>>,
+    pub unity_filter: Filter,
+}
 
 pub struct Filter {
     pub ignore_classes: HashSet<ClassId>,
@@ -77,10 +87,7 @@ fn write_object_hierarchy<W: std::fmt::Write, R: EnvResolver, P: TypeTreeProvide
 }
 
 fn diff_serializedfile_smart(cx: &Context, _: &Path, data: OldNew<&[u8]>) -> Result<String> {
-    let env = cx
-        .unity_game
-        .as_ref()
-        .context("cannot diff bundlefile outside unity game")?;
+    let env = &cx.unity_game;
 
     let old_reader = &mut Cursor::new(data.old);
     let new_reader = &mut Cursor::new(data.new);
@@ -91,17 +98,16 @@ fn diff_serializedfile_smart(cx: &Context, _: &Path, data: OldNew<&[u8]>) -> Res
     new.m_UnityVersion
         .get_or_insert(env.new.unity_version()?.clone());
 
-    let old = SerializedFileHandle::new(&env.old, &old, data.old);
-    let new = SerializedFileHandle::new(&env.new, &new, data.new);
+    let old = SerializedFileHandle::new(env.old, &old, data.old);
+    let new = SerializedFileHandle::new(env.new, &new, data.new);
 
     let file = OldNew::new(old, new);
 
-    let mut text = super::diff_text(
-        cx,
-        OldNew::new(
-            &format!("{:#?}", format::SerializedFile::from(file.old.file)),
-            &format!("{:#?}", format::SerializedFile::from(file.new.file)),
-        ),
+    let header_old = format!("{:#?}", format::SerializedFile::from(file.old.file));
+    let header_new = format!("{:#?}", format::SerializedFile::from(file.new.file));
+    let mut text = istaan_diff_core::diff_text(
+        OldNew::new(header_old.as_str(), header_new.as_str()),
+        cx.text_diff_context_size,
     );
     if !text.is_empty() {
         text.push('\n');
@@ -130,7 +136,10 @@ fn diff_serializedfile_smart(cx: &Context, _: &Path, data: OldNew<&[u8]>) -> Res
         }
         Ok(out)
     })?;
-    text.push_str(&super::diff_text_context(hierarchy.as_deref(), usize::MAX));
+    text.push_str(&istaan_diff_core::diff_text_context(
+        hierarchy.as_deref(),
+        usize::MAX,
+    ));
 
     let mut cx = SceneMatcher {
         cx,
@@ -238,7 +247,7 @@ impl<'a, P: TypeTreeProvider> SceneMatcher<'a, P> {
                 qualify_pptrs(&self.file.old, &mut value.old).context("qualifying pptrs")?;
                 qualify_pptrs(&self.file.new, &mut value.new).context("qualifying pptrs")?;
 
-                let diff = super::diff_json(self.cx, value.as_ref())?;
+                let diff = istaan_diff_json::diff_json(&self.cx.json, value.as_ref())?;
                 if !diff.is_empty() {
                     writeln!(self.out, "--- Changed {} @ '{}' ---", component, path)?;
                     writeln!(self.out, "{}", diff)?;
@@ -374,10 +383,7 @@ impl Display for ComponentKey {
 
 #[allow(dead_code)]
 fn diff_serializedfile_old(cx: &Context, path: &Path, data: OldNew<&[u8]>) -> Result<String> {
-    let env = cx
-        .unity_game
-        .as_ref()
-        .context("cannot diff bundlefile outside unity game")?;
+    let env = &cx.unity_game;
 
     let old_reader = &mut Cursor::new(data.old);
     let new_reader = &mut Cursor::new(data.new);
@@ -388,18 +394,17 @@ fn diff_serializedfile_old(cx: &Context, path: &Path, data: OldNew<&[u8]>) -> Re
     new.m_UnityVersion
         .get_or_insert(env.new.unity_version()?.clone());
 
-    let old = SerializedFileHandle::new(&env.old, &old, data.old);
-    let new = SerializedFileHandle::new(&env.new, &new, data.new);
+    let old = SerializedFileHandle::new(env.old, &old, data.old);
+    let new = SerializedFileHandle::new(env.new, &new, data.new);
 
     let file = OldNew::new(old, new);
     let file = file.as_ref();
 
-    let mut text = super::diff_text(
-        cx,
-        OldNew::new(
-            &format!("{:#?}", format::SerializedFile::from(file.old.file)),
-            &format!("{:#?}", format::SerializedFile::from(file.new.file)),
-        ),
+    let header_old = format!("{:#?}", format::SerializedFile::from(file.old.file));
+    let header_new = format!("{:#?}", format::SerializedFile::from(file.new.file));
+    let mut text = istaan_diff_core::diff_text(
+        OldNew::new(header_old.as_str(), header_new.as_str()),
+        cx.text_diff_context_size,
     );
     if !text.is_empty() {
         text.push('\n');
@@ -434,13 +439,13 @@ fn diff_serializedfile_old(cx: &Context, path: &Path, data: OldNew<&[u8]>) -> Re
         if cx.unity_filter.matches(&object) {
             let mut val = object.read()?;
             let script = object.mono_script()?;
-            let name = name(&object, &val)?;
+            let obj_name = name(&object, &val)?;
 
             write!(&mut text, "--- added {:?}", object.class_id())?;
             if let Some(script) = &script {
                 write!(&mut text, " {}", script.full_name())?;
             }
-            write!(&mut text, " {name}")?;
+            write!(&mut text, " {obj_name}")?;
             writeln!(&mut text, " ---")?;
 
             qualify_pptrs(file.new, &mut val)?;
@@ -448,11 +453,11 @@ fn diff_serializedfile_old(cx: &Context, path: &Path, data: OldNew<&[u8]>) -> Re
             writeln!(&mut text, "{}", serde_json::to_string_pretty(&val)?)?;
         } else {
             let val = object.read()?;
-            let name = name(&object, &val)?;
+            let obj_name = name(&object, &val)?;
             writeln!(
                 &mut text,
                 "--- added {:?} {} ---",
-                object.object.info.m_ClassID, name
+                object.object.info.m_ClassID, obj_name
             )?;
         }
     }
@@ -483,7 +488,7 @@ fn diff_serializedfile_old(cx: &Context, path: &Path, data: OldNew<&[u8]>) -> Re
 
                 let mut value = OldNew::new(old_value, new_value);
 
-                let name = object.try_map_zip(&value, |object, val| name(object, val))?;
+                let obj_name = object.try_map_zip(&value, |object, val| name(object, val))?;
                 let script = object.try_map(|obj| obj.mono_script())?;
 
                 qualify_pptrs(file.old, &mut value.old)?;
@@ -491,7 +496,7 @@ fn diff_serializedfile_old(cx: &Context, path: &Path, data: OldNew<&[u8]>) -> Re
 
                 let matches_filter = cx.unity_filter.matches(object.new);
                 let diff = matches_filter
-                    .then(|| super::diff_json(cx, value.as_ref()))
+                    .then(|| istaan_diff_json::diff_json(&cx.json, value.as_ref()))
                     .transpose()?
                     .filter(|diff| !diff.is_empty());
 
@@ -514,9 +519,9 @@ fn diff_serializedfile_old(cx: &Context, path: &Path, data: OldNew<&[u8]>) -> Re
                             }
                         }
                     }
-                    write!(&mut text, " {}", name.new)?;
-                    if name.changed() {
-                        write!(&mut text, " (previously {})", name.old)?;
+                    write!(&mut text, " {}", obj_name.new)?;
+                    if obj_name.changed() {
+                        write!(&mut text, " (previously {})", obj_name.old)?;
                         major_change = true;
                     }
                     writeln!(&mut text, " ---")?;
@@ -549,10 +554,7 @@ fn diff_serializedfile_old(cx: &Context, path: &Path, data: OldNew<&[u8]>) -> Re
 }
 
 pub fn diff_bundlefile(cx: &Context, path: &Path, data: OldNew<&[u8]>) -> Result<String> {
-    let env = cx
-        .unity_game
-        .as_ref()
-        .context("cannot diff bundlefile outside unity game")?;
+    let env = &cx.unity_game;
 
     let bundle = data.try_map_zip(env, |data, env| -> Result<_> {
         let config =

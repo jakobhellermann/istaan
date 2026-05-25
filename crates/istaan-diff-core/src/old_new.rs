@@ -46,6 +46,8 @@ impl<T> OldNew<T> {
             new: f(self.new, &other.new)?,
         })
     }
+
+    #[cfg(feature = "rayon")]
     pub fn try_map_parallel<U: Send, E: Send>(
         self,
         f: impl Fn(T) -> Result<U, E> + Send + Sync,
