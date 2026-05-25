@@ -25,12 +25,12 @@ use rabex_env::unity::types::{GameObject, MonoBehaviour, Transform};
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::Deserialize;
 
-pub struct Context<'a> {
+pub struct Context<'a, R = GameFiles, P = &'a TypeTreeCache<TpkTypeTreeBlob>> {
     pub text_diff_context_size: usize,
 
     pub json: JsonDiffOptions,
 
-    pub unity_game: OldNew<&'a Environment<GameFiles, &'a TypeTreeCache<TpkTypeTreeBlob>>>,
+    pub unity_game: OldNew<&'a Environment<R, P>>,
     pub unity_filter: Filter,
 }
 
@@ -43,7 +43,11 @@ impl Filter {
     }
 }
 
-pub fn diff_serializedfile(cx: &Context, path: &Path, data: OldNew<&[u8]>) -> Result<String> {
+pub fn diff_serializedfile<R: EnvResolver, P: TypeTreeProvider>(
+    cx: &Context<R, P>,
+    path: &Path,
+    data: OldNew<&[u8]>,
+) -> Result<String> {
     diff_serializedfile_smart(cx, path, data)
 }
 
@@ -86,7 +90,11 @@ fn write_object_hierarchy<W: std::fmt::Write, R: EnvResolver, P: TypeTreeProvide
     Ok(())
 }
 
-fn diff_serializedfile_smart(cx: &Context, _: &Path, data: OldNew<&[u8]>) -> Result<String> {
+fn diff_serializedfile_smart<R: EnvResolver, P: TypeTreeProvider>(
+    cx: &Context<R, P>,
+    _: &Path,
+    data: OldNew<&[u8]>,
+) -> Result<String> {
     let env = &cx.unity_game;
 
     let old_reader = &mut Cursor::new(data.old);
@@ -170,10 +178,10 @@ fn diff_serializedfile_smart(cx: &Context, _: &Path, data: OldNew<&[u8]>) -> Res
     Ok(text)
 }
 
-struct SceneMatcher<'a, P> {
-    cx: &'a Context<'a>,
+struct SceneMatcher<'a, R, P> {
+    cx: &'a Context<'a, R, P>,
     transforms: &'a OldNew<IndexMap<PathId, (Transform, GameObject)>>,
-    file: OldNew<SerializedFileHandle<'a, GameFiles, P>>,
+    file: OldNew<SerializedFileHandle<'a, R, P>>,
 
     current_old: PathId,
     current_path: Vec<String>,
@@ -182,7 +190,7 @@ struct SceneMatcher<'a, P> {
 
     old_seen: FxHashSet<PathId>,
 }
-impl<'a, P: TypeTreeProvider> SceneMatcher<'a, P> {
+impl<'a, R: EnvResolver, P: TypeTreeProvider> SceneMatcher<'a, R, P> {
     fn added_object(&mut self, path: String) -> Result<()> {
         writeln!(self.out, "--- Added Object '{}' ---", path)?;
         Ok(())
